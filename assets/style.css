@@ -1,0 +1,94 @@
+body,
+html {
+    margin: 0;
+    padding: 0;
+
+    font-family: "Noto Sans", sans-serif;
+    font-optical-sizing: auto;
+    font-style: normal;
+    font-variation-settings: "wdth" 100;
+
+    color: #bac0c9;
+    background-color: #151b23;
+    border-color: #3d444d;
+}
+
+a {
+    text-decoration: none;
+    color: #bac0c9;
+}
+
+main {
+    display: flex;
+    flex-direction: column;
+
+    padding: 1em;
+}
+
+.prs {
+    display: grid;
+    gap: 1em;
+    grid-template-columns: repeat(auto-fill, minmax(20em, 1fr));
+}
+
+.pr {
+    background-color: #212830;
+    padding: 0.25em 1em;
+    padding-bottom: 1em;
+    border-radius: 0.5em;
+    border: 0.05rem solid;
+
+    h2 {
+        font-size: large;
+    }
+
+    min-height: 10em;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+
+    position: relative;
+}
+
+.field {
+    font-size: large;
+
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+
+    .value {
+        margin-left: auto;
+    }
+}
+
+.author {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25em;
+
+    .avatar {
+        height: 1em;
+        aspect-ratio: 1/1;
+        vertical-align: middle;
+        display: inline-block;
+    }
+}
+
+.fields:has(.badge) {
+    margin-bottom: 2em;
+}
+
+.badge {
+    background: #347d39;
+
+    margin: 0.5em;
+    padding: 0.25em 0.5em;
+    border-radius: 0.5em;
+
+    position: absolute;
+    right: 0;
+    bottom: 0;
+}

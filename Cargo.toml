@@ -1,0 +1,20 @@
+[package]
+name = "reviewqueue"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+octocrab = "0.44"
+rust-query = { git = "https://github.com/LHolten/rust-query" }
+tokio = { version = "1", features = ["full"] }
+color-eyre = "0.6.5"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+url = "2"
+reqwest = "0.12"
+scraper = "0.23"
+maud = { version = "0.27", features = ["axum"] }
+axum = "0.8"
+jiff = "0.2"
+tower-http = { version = "0.6", features = ["fs"] }
