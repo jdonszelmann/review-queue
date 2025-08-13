@@ -4,16 +4,14 @@ use axum::{
     extract::State,
     response::{IntoResponse, Redirect, Response},
 };
-use axum_extra::extract::CookieJar;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use octocrab::models::Author;
-use tokio::sync::Mutex;
 
 use crate::{
-    AppState, Config, REFRESH_RATE,
+    AppState, REFRESH_RATE,
     auth::ExtractLoginContext,
     get_and_update_state,
-    model::{LoginContext, Pr, PrBoxKind},
+    model::{BackendStatus, LoginContext, Pr, PrBoxKind},
 };
 
 pub fn field(label: impl AsRef<str>, value: Markup) -> Markup {
@@ -58,9 +56,17 @@ pub async fn queue_page(
         return Redirect::to("/").into_response();
     };
 
+    let backend_state = state
+        .users_prs_by_username
+        .lock()
+        .await
+        .get(&config.username)
+        .map(|i| i.status.clone())
+        .unwrap_or(BackendStatus::Uninitialized);
+
     page_template(html! {
         nav {
-            // "backend status: " (state.lock().await.status)
+            "backend status: " (backend_state)
         }
         main {
             (render_pr_box(config.clone(), PrBoxKind::WorkReady).await)
