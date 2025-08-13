@@ -19,29 +19,25 @@ use tokio::{
 };
 
 use crate::{
+    Config,
     api::{
         bors::{BorsInfo, BorsStatus, get_bors_queue},
         crater::get_crater_queue,
     },
     model::{
-        Config, CraterInfo, CraterStatus, FcpStatus, OwnPr, OwnPrStatus, Pr, PrReview,
+        CraterInfo, CraterStatus, FcpStatus, LoginContext, OwnPr, OwnPrStatus, Pr, PrReview,
         PrReviewStatus, PrStatus, QueuedStatus, Repo, SharedStatus,
     },
 };
 
-pub async fn get_prs(config: Config) -> color_eyre::Result<Vec<Pr>> {
+pub async fn get_prs(config: Arc<LoginContext>) -> color_eyre::Result<Vec<Pr>> {
     tracing::info!("logging in");
-    let octocrab = Octocrab::builder()
-        .personal_token(config.token.as_str())
-        .build()
-        .context("build octocrab")?;
-
     sleep(Duration::from_secs(1)).await;
 
     let (tx, mut rx) = channel(16);
 
     spawn(async move {
-        if let Err(e) = process_repos(config, octocrab, tx.clone()).await {
+        if let Err(e) = process_repos(config, tx.clone()).await {
             tx.send(Err(e)).await.unwrap();
         }
     });
@@ -63,8 +59,7 @@ pub async fn get_prs(config: Config) -> color_eyre::Result<Vec<Pr>> {
 }
 
 async fn process_repos(
-    config: Config,
-    octocrab: Octocrab,
+    config: Arc<LoginContext>,
     tx: Sender<color_eyre::Result<Pr>>,
 ) -> color_eyre::Result<()> {
     for repo in config.repos.clone() {
@@ -107,9 +102,9 @@ async fn process_repos(
 
         let author = process_issues(
             config.clone(),
-            octocrab.clone(),
             async || {
-                octocrab
+                config
+                    .octocrab
                     .clone()
                     .issues(&repo.owner, &repo.name)
                     .list()
@@ -128,9 +123,9 @@ async fn process_repos(
 
         let reviewer = process_issues(
             config.clone(),
-            octocrab.clone(),
             async || {
-                octocrab
+                config
+                    .octocrab
                     .clone()
                     .issues(&repo.owner, &repo.name)
                     .list()
@@ -159,15 +154,14 @@ async fn process_repos(
 }
 
 async fn process_issues<F: Future<Output = color_eyre::Result<Page<Issue>>>>(
-    config: Config,
-    octocrab: Octocrab,
+    config: Arc<LoginContext>,
     issues: impl Fn() -> F,
     bors: Option<Arc<SetOnce<HashMap<u64, BorsInfo>>>>,
     crater: Arc<SetOnce<HashMap<u64, CraterStatus>>>,
     tx: Sender<color_eyre::Result<Pr>>,
     own_pr: bool,
 ) -> color_eyre::Result<()> {
-    for repo in config.repos {
+    for repo in config.repos.clone() {
         tracing::info!("getting prs and issues for {}/{}", repo.owner, repo.name);
 
         let mut ctr = 0;
@@ -202,12 +196,12 @@ async fn process_issues<F: Future<Output = color_eyre::Result<Page<Issue>>>>(
 
             for issue in page {
                 let tx = tx.clone();
-                let octocrab = octocrab.clone();
                 let repo = repo.clone();
                 let bors = bors.clone();
                 let crater = crater.clone();
+                let config = config.clone();
                 spawn(async move {
-                    match process_pr(octocrab, repo, bors, crater, issue, own_pr).await {
+                    match process_pr(config, repo, bors, crater, issue, own_pr).await {
                         Ok(Some(i)) => {
                             tx.send(Ok(i)).await.unwrap();
                         }
@@ -218,7 +212,7 @@ async fn process_issues<F: Future<Output = color_eyre::Result<Page<Issue>>>>(
                     }
                 });
             }
-            page = match octocrab.get_page::<Issue>(&next).await? {
+            page = match config.octocrab.get_page::<Issue>(&next).await? {
                 Some(next_page) => next_page,
                 None => break,
             }
@@ -229,7 +223,7 @@ async fn process_issues<F: Future<Output = color_eyre::Result<Page<Issue>>>>(
 }
 
 async fn comments(
-    octocrab: Octocrab,
+    config: Arc<LoginContext>,
     repo: Repo,
     issue_number: u64,
 ) -> color_eyre::Result<Vec<Comment>> {
@@ -243,7 +237,8 @@ async fn comments(
     let mut res = Vec::new();
 
     let mut page = loop {
-        let page = octocrab
+        let page = config
+            .octocrab
             .issues(&repo.owner, &repo.name)
             .list_comments(issue_number)
             .per_page(100)
@@ -272,7 +267,11 @@ async fn comments(
         for comment in page {
             res.push(comment);
         }
-        page = match octocrab.get_page::<models::issues::Comment>(&next).await? {
+        page = match config
+            .octocrab
+            .get_page::<models::issues::Comment>(&next)
+            .await?
+        {
             Some(next_page) => next_page,
             None => break,
         }
@@ -282,7 +281,7 @@ async fn comments(
 }
 
 async fn process_pr(
-    octocrab: Octocrab,
+    config: Arc<LoginContext>,
     repo: Repo,
     bors: Option<Arc<SetOnce<HashMap<u64, BorsInfo>>>>,
     crater: Arc<SetOnce<HashMap<u64, CraterStatus>>>,
@@ -301,7 +300,7 @@ async fn process_pr(
     let comments_cell = OnceCell::new();
     let get_comments = {
         let repo = repo.clone();
-        || comments_cell.get_or_try_init(|| comments(octocrab, repo, issue.number))
+        || comments_cell.get_or_try_init(|| comments(config, repo, issue.number))
     };
 
     let bors = if let Some(bors) = bors

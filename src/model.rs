@@ -1,23 +1,28 @@
+use std::sync::Arc;
+
 use jiff::{SignedDuration, Span, SpanRound, Timestamp, Unit};
 use maud::{Markup, Render, html};
-use octocrab::models::Author;
+use octocrab::{Octocrab, models::Author};
 use url::Url;
 
-use crate::ui::{field, render_author};
+use crate::{
+    AppState,
+    queue_page::{field, render_author},
+};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+pub struct LoginContext {
+    pub username: String,
+    pub repos: Vec<Repo>,
+    pub octocrab: Octocrab,
+    pub state: Arc<AppState>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Repo {
     pub owner: String,
     pub name: String,
     pub bors_queue_url: Option<Url>,
-}
-
-#[derive(Clone)]
-pub struct Config {
-    pub username: String,
-    pub token: String,
-
-    pub repos: Vec<Repo>,
 }
 
 #[derive(Clone)]
@@ -254,9 +259,13 @@ impl Pr {
     }
 }
 
+#[derive(Default)]
 pub enum BackendStatus {
-    Idle { last_refresh: Timestamp },
+    Idle {
+        last_refresh: Timestamp,
+    },
     Refreshing,
+    #[default]
     Uninitialized,
 }
 

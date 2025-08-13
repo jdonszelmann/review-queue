@@ -1,13 +1,19 @@
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::{
+    extract::State,
+    response::{IntoResponse, Redirect, Response},
+};
+use axum_extra::extract::CookieJar;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use octocrab::models::Author;
 use tokio::sync::Mutex;
 
 use crate::{
-    AppState, REFRESH_RATE,
-    model::{Pr, PrBoxKind},
+    AppState, Config, REFRESH_RATE,
+    auth::ExtractLoginContext,
+    get_and_update_state,
+    model::{LoginContext, Pr, PrBoxKind},
 };
 
 pub fn field(label: impl AsRef<str>, value: Markup) -> Markup {
@@ -21,7 +27,7 @@ pub fn field(label: impl AsRef<str>, value: Markup) -> Markup {
     }
 }
 
-pub async fn home(State(state): State<Arc<Mutex<AppState>>>) -> Markup {
+pub fn page_template(body: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html {
@@ -35,39 +41,55 @@ pub async fn home(State(state): State<Arc<Mutex<AppState>>>) -> Markup {
                 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
                 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
                 "#))
-                script {
-                    (PreEscaped(format!(r#"
-                        setTimeout(() => {{
-                            window.location.reload();
-                        }}, {})
-                    "#, REFRESH_RATE.as_millis() / 4)))
-                }
             }
             body {
-                nav {
-                    "backend status: " (state.lock().await.status)
-                }
-                main {
-                    (render_pr_box(state.clone(), PrBoxKind::WorkReady).await)
-                    (render_pr_box(state.clone(), PrBoxKind::TodoReview).await)
-                    (render_pr_box(state.clone(), PrBoxKind::Stalled).await)
-                    (render_pr_box(state.clone(), PrBoxKind::Queue).await)
-                    (render_pr_box(state.clone(), PrBoxKind::Other).await)
-                }
+                (body)
             }
         }
     }
 }
 
-pub async fn render_pr_box(state: Arc<Mutex<AppState>>, kind: PrBoxKind) -> Markup {
+pub async fn queue_page(
+    State(state): State<Arc<AppState>>,
+    ExtractLoginContext(config): ExtractLoginContext,
+) -> Response {
+    tracing::info!("{config:?}");
+    let Some(config) = config else {
+        return Redirect::to("/").into_response();
+    };
+
+    page_template(html! {
+        nav {
+            // "backend status: " (state.lock().await.status)
+        }
+        main {
+            (render_pr_box(config.clone(), PrBoxKind::WorkReady).await)
+            (render_pr_box(config.clone(), PrBoxKind::TodoReview).await)
+            (render_pr_box(config.clone(), PrBoxKind::Stalled).await)
+            (render_pr_box(config.clone(), PrBoxKind::Queue).await)
+            (render_pr_box(config.clone(), PrBoxKind::Other).await)
+        }
+
+        script {
+            (PreEscaped(format!(r#"
+                setTimeout(() => {{
+                    window.location.reload();
+                }}, {})
+            "#, REFRESH_RATE.as_millis() / 4)))
+        }
+    })
+    .into_response()
+}
+
+pub async fn render_pr_box(config: Arc<LoginContext>, kind: PrBoxKind) -> Markup {
+    let prs = get_and_update_state(config).await;
+
     html! {
         div class="prbox" {
             h1 { (kind) }
             div class="prs" {
                 @for pr in {
-                    let guard = state.lock().await;
-                    let mut prs = guard.prs.iter().filter(|pr| pr.sort() == kind).cloned().collect::<Vec<_>>();
-                    drop(guard);
+                    let mut prs = prs.into_iter().filter(|pr| pr.sort() == kind).collect::<Vec<_>>();
                     prs.sort_by_cached_key(|pr| pr.title.clone());
                     prs
                 } {
