@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use color_eyre::eyre::Context;
 use octocrab::{
-    Octocrab, Page,
+    Page,
     models::{
         self,
         issues::{Comment, Issue},
@@ -20,14 +20,13 @@ use tokio::{
 };
 
 use crate::{
-    Config,
     api::{
-        bors::{BorsInfo, BorsStatus, get_bors_queue},
+        bors::{AllBorsInfo, BorsInfo, BorsStatus, get_bors_queue},
         crater::get_crater_queue,
     },
     model::{
         CiStatus, CraterInfo, CraterStatus, FcpStatus, LoginContext, OwnPr, OwnPrStatus, Pr,
-        PrReview, PrReviewStatus, PrStatus, QueuedStatus, Repo, SharedStatus,
+        PrReview, PrReviewStatus, PrStatus, QueuedStatus, Repo, RollupStatus, SharedStatus,
     },
 };
 
@@ -64,18 +63,20 @@ async fn process_repos(
     tx: Sender<color_eyre::Result<Pr>>,
 ) -> color_eyre::Result<()> {
     for repo in config.repos.clone() {
-        let bors = if let Some(bors_url) = repo.bors_queue_url {
+        let bors = if let Some(bors_url) = repo.bors_queue_url.clone() {
             let shared = Arc::new(SetOnce::new());
 
             let inner = shared.clone();
+            let local_config = config.clone();
+            let local_repo = repo.clone();
             spawn(async move {
-                match get_bors_queue(bors_url).await {
+                match get_bors_queue(local_config, local_repo, bors_url).await {
                     Ok(i) => {
                         inner.set(i).unwrap();
                     }
                     Err(e) => {
                         tracing::error!("{e}");
-                        inner.set(HashMap::new()).unwrap();
+                        inner.set(Default::default()).unwrap();
                     }
                 }
             });
@@ -157,7 +158,7 @@ async fn process_repos(
 async fn process_issues<F: Future<Output = color_eyre::Result<Page<Issue>>>>(
     config: Arc<LoginContext>,
     issues: impl Fn() -> F,
-    bors: Option<Arc<SetOnce<HashMap<u64, BorsInfo>>>>,
+    bors: Option<Arc<SetOnce<AllBorsInfo>>>,
     crater: Arc<SetOnce<HashMap<u64, CraterStatus>>>,
     tx: Sender<color_eyre::Result<Pr>>,
     own_pr: bool,
@@ -281,7 +282,7 @@ async fn comments(
     Ok(res)
 }
 
-async fn pr_info(
+pub async fn pr_info(
     config: &Arc<LoginContext>,
     repo: &Repo,
     pr_number: u64,
@@ -299,7 +300,7 @@ async fn pr_info(
 async fn process_pr(
     config: Arc<LoginContext>,
     repo: Repo,
-    bors: Option<Arc<SetOnce<HashMap<u64, BorsInfo>>>>,
+    bors: Option<Arc<SetOnce<AllBorsInfo>>>,
     crater: Arc<SetOnce<HashMap<u64, CraterStatus>>>,
     issue: Issue,
     own_pr: bool,
@@ -322,9 +323,10 @@ async fn process_pr(
     };
 
     let bors = if let Some(bors) = bors
-        && let Some(bors_info) = bors.wait().await.get(&issue.number)
+        && let all_bors_info = bors.wait().await
+        && let Some(bors_info) = all_bors_info.prs.get(&issue.number)
     {
-        Some(bors_info.clone())
+        Some((bors_info.clone(), all_bors_info.rollups.clone()))
     } else {
         None
     };
@@ -371,14 +373,39 @@ async fn process_pr(
         Ok(None)
     };
 
-    let status = if let Some(bors) = &bors
+    let status = if let Some((bors, rollups)) = &bors
         && (bors.status == BorsStatus::Approved || bors.status == BorsStatus::Pending)
     {
+        let mut rollup_status = RollupStatus::InQueue {
+            position: bors.position_in_queue,
+        };
+
+        if bors.running {
+            rollup_status = RollupStatus::Running;
+        } else {
+            for (idx, rollup) in rollups.iter().enumerate() {
+                if rollup.pr_numbers.contains(&issue.number) {
+                    rollup_status = if rollup.running {
+                        RollupStatus::InRunningRollup
+                    } else if idx == 0 {
+                        RollupStatus::InNextRollup {
+                            position: rollup.position_in_queue,
+                        }
+                    } else {
+                        RollupStatus::InRollup { nth_rollup: idx }
+                    };
+
+                    break;
+                }
+            }
+        }
+
         PrStatus::Queued(QueuedStatus {
             // TODO: make this the bors approver
             approvers: issue.assignees.iter().map(|i| i.clone()).collect(),
             author: issue.user,
             rollup_setting: bors.rollup_setting.clone(),
+            rollup_status,
         })
     } else if own_pr {
         // creator
@@ -423,7 +450,11 @@ async fn process_pr(
                 .clone()
                 .unwrap_or(MergeableState::Unknown)
         ),
-        ci_status: match (pr.mergeable, pr.mergeable_state, bors) {
+        ci_status: match (
+            pr.mergeable,
+            pr.mergeable_state,
+            bors.as_ref().map(|i| &i.0),
+        ) {
             _ if pr.draft.is_some_and(|i| i) => CiStatus::Draft,
             (Some(_), Some(MergeableState::Behind | MergeableState::Dirty), _) => {
                 CiStatus::Conflicted

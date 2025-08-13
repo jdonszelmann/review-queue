@@ -151,8 +151,11 @@ pub struct OwnPr {
 
 #[derive(Clone)]
 pub enum RollupStatus {
-    Pending,
+    InQueue { position: usize },
     Running,
+    InNextRollup { position: usize },
+    InRollup { nth_rollup: usize },
+    InRunningRollup,
 }
 
 #[derive(Clone)]
@@ -160,13 +163,13 @@ pub struct QueuedStatus {
     pub author: Author,
     pub approvers: Vec<Author>,
     pub rollup_setting: RollupSetting,
+    pub rollup_status: RollupStatus,
 }
 
 #[derive(Clone)]
 pub enum PrStatus {
     Review(PrReview),
     Own(OwnPr),
-    Rollup(RollupStatus),
     Queued(QueuedStatus),
 }
 
@@ -237,8 +240,7 @@ impl Pr {
                 OwnPrStatus::Pending => PrBoxKind::WorkReady,
                 OwnPrStatus::Shared(shared_status) => shared_status.sort(),
             },
-            PrStatus::Rollup(rollup_status) => todo!(),
-            PrStatus::Queued(queued_status) => PrBoxKind::Queue,
+            PrStatus::Queued(_) => PrBoxKind::Queue,
         }
     }
 
@@ -269,35 +271,67 @@ impl Pr {
         }
     }
 
-    pub fn badge(&self) -> Option<Markup> {
+    pub fn rollup(&self) -> Option<Markup> {
+        if let PrStatus::Queued(r) = &self.status {
+            match r.rollup_status {
+                RollupStatus::InQueue { position: 1 } => Some(html! {span {"1st in queue"}}),
+                RollupStatus::InQueue { position: 2 } => Some(html! {span {"2nd in queue"}}),
+                RollupStatus::InQueue { position: 3 } => Some(html! {span {"3rd in queue"}}),
+                RollupStatus::InQueue { position } => Some(html! {span {(position) "th in queue"}}),
+                RollupStatus::Running => Some(html! {span {"running"}}),
+                RollupStatus::InRollup { nth_rollup: 0 } => Some(html! {"in next rollup"}),
+                RollupStatus::InRollup { nth_rollup: 1 } => Some(html! {"in 2nd rollup"}),
+                RollupStatus::InRollup { nth_rollup: 2 } => Some(html! {"in 3rd rollup"}),
+                RollupStatus::InRollup { nth_rollup } => Some(html! {"in "(nth_rollup)"th rollup"}),
+                RollupStatus::InRunningRollup => Some(html! {span {"in running rollup"}}),
+                RollupStatus::InNextRollup { position: 1 } => {
+                    Some(html! {span {"rollup 1st in queue"}})
+                }
+                RollupStatus::InNextRollup { position: 2 } => {
+                    Some(html! {span {"rollup 2nd in queue"}})
+                }
+                RollupStatus::InNextRollup { position: 3 } => {
+                    Some(html! {span {"rollup 3rd in queue"}})
+                }
+                RollupStatus::InNextRollup { position } => {
+                    Some(html! {span {"rollup " (position)"th in queue"}})
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn badge(&self) -> Vec<Markup> {
+        let mut res = Vec::new();
+
         match &self.status {
             PrStatus::Review(pr_review) => match &pr_review.status {
-                PrReviewStatus::Author => Some(html! {
+                PrReviewStatus::Author => res.push(html! {
                     span{"waiting for author"}
                 }),
-                PrReviewStatus::Review => None,
-                PrReviewStatus::Shared(shared_status) => shared_status.stalled(),
+                PrReviewStatus::Review => {}
+                PrReviewStatus::Shared(shared_status) => res.extend(shared_status.stalled()),
             },
             PrStatus::Own(own_pr) => match &own_pr.status {
-                OwnPrStatus::WaitingForReview => Some(html! {
+                OwnPrStatus::WaitingForReview => res.push(html! {
                     span {"waiting for review"}
                 }),
-                OwnPrStatus::Pending => None,
-                OwnPrStatus::Shared(shared_status) => shared_status.stalled(),
+                OwnPrStatus::Pending => {}
+                OwnPrStatus::Shared(shared_status) => res.extend(shared_status.stalled()),
             },
-            PrStatus::Rollup(rollup_status) => None,
             PrStatus::Queued(QueuedStatus {
-                author,
-                approvers,
                 rollup_setting: RollupSetting::Iffy,
-            }) => Some(html! { span{"rollup=iffy"} }),
+                ..
+            }) => res.push(html! { span{"rollup=iffy"} }),
             PrStatus::Queued(QueuedStatus {
-                author,
-                approvers,
                 rollup_setting: RollupSetting::Never,
-            }) => Some(html! { span{"rollup=never"} }),
-            PrStatus::Queued(..) => None,
+                ..
+            }) => res.push(html! { span{"rollup=never"} }),
+            PrStatus::Queued(..) => {}
         }
+
+        res
     }
 }
 

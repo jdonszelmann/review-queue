@@ -184,7 +184,7 @@ pub async fn render_pr_box(prs: &[Pr], kind: PrBoxKind) -> Markup {
 pub fn render_badges(pr: &Pr) -> Markup {
     let mut badges = Vec::new();
 
-    if let Some(badge) = pr.badge() {
+    for badge in pr.badge() {
         badges.push(html! {
             div class="status-badge" {
                 (badge)
@@ -239,6 +239,9 @@ pub async fn render_pr(pr: &Pr) -> Markup {
                 }
                 @if let Some(r) = pr.reviewers() {
                     (r)
+                }
+                @if let Some(r) = pr.rollup() {
+                    (field("status", r))
                 }
 
                 (render_badges(pr))
