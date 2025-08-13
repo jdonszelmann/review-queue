@@ -90,15 +90,22 @@ pub async fn queue_page(
 pub async fn render_pr_box(config: Arc<LoginContext>, kind: PrBoxKind) -> Markup {
     let prs = get_and_update_state(config).await;
 
+    let mut prs = prs
+        .into_iter()
+        .filter(|pr| pr.sort() == kind)
+        .collect::<Vec<_>>();
+
+    if prs.is_empty() {
+        return html! {};
+    }
+
+    prs.sort_by_cached_key(|pr| pr.title.clone());
+
     html! {
         div class="prbox" {
             h1 { (kind) }
             div class="prs" {
-                @for pr in {
-                    let mut prs = prs.into_iter().filter(|pr| pr.sort() == kind).collect::<Vec<_>>();
-                    prs.sort_by_cached_key(|pr| pr.title.clone());
-                    prs
-                } {
+                @for pr in prs {
                     (render_pr(&pr).await)
                 }
             }

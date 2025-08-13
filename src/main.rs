@@ -31,10 +31,6 @@ pub struct Config {
     pub host: String,
     pub oauth_client_id: String,
     pub oauth_client_secret: String,
-    // pub username: String,
-    // pub token: String,
-
-    // pub repos: Vec<Repo>,
 }
 
 #[derive(Default)]
@@ -127,6 +123,7 @@ async fn main() -> color_eyre::Result<()> {
         .route("/queue", get(queue_page::queue_page))
         .with_state(Arc::new(AppState::new(db, config)))
         .nest_service("/assets/", ServeDir::new("assets"));
+
     let address = "0.0.0.0:3000";
 
     let listener = tokio::net::TcpListener::bind(address).await.unwrap();
