@@ -58,6 +58,10 @@ macro_rules! get_client {
     };
 }
 
+pub async fn logout(State(state): State<Arc<AppState>>, jar: CookieJar) -> impl IntoResponse {
+    (jar.remove("github-token"), Redirect::to("/"))
+}
+
 pub async fn login(
     State(state): State<Arc<AppState>>,
     Query(mut params): Query<HashMap<String, String>>,

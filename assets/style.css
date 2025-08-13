@@ -21,6 +21,33 @@ a {
     color: #bac0c9;
 }
 
+nav {
+    display: flex;
+    flex-direction: row;
+
+    height: 3em;
+    align-items: center;
+
+    padding: 0em 1em;
+
+    backend-status {
+        display: flex;
+        flex-direction: row;
+        gap: 1em;
+    }
+
+    .divider {
+        margin-left: auto;
+    }
+
+    .logout {
+        background-color: #212830;
+        border-radius: 0.5em;
+        border: 0.05rem solid;
+        padding: 0.5em 1em;
+    }
+}
+
 main {
     display: flex;
     flex-direction: column;

@@ -66,7 +66,17 @@ pub async fn queue_page(
 
     page_template(html! {
         nav {
-            "backend status: " (backend_state)
+            div class="backend-status" {
+                span {"backend status: "} span{(backend_state)}
+            }
+
+            div class="divider" {}
+
+            div class="logout" {
+                a href="/logout" {
+                    "logout"
+                }
+            }
         }
         main {
             (render_pr_box(config.clone(), PrBoxKind::WorkReady).await)

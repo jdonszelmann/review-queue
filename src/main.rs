@@ -1,5 +1,6 @@
 use axum::response::Redirect;
 use axum::{Router, routing::get};
+use axum_extra::extract::CookieJar;
 use color_eyre::eyre::Context;
 use jiff::Timestamp;
 use rust_query::Database;
@@ -121,6 +122,7 @@ async fn main() -> color_eyre::Result<()> {
         .route("/auth/github/login", get(auth::login))
         .route("/auth/github/callback", get(auth::callback))
         .route("/queue", get(queue_page::queue_page))
+        .route("/logout", get(auth::logout))
         .with_state(Arc::new(AppState::new(db, config)))
         .nest_service("/assets/", ServeDir::new("assets"));
 
