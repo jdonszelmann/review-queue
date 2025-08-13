@@ -6,6 +6,7 @@ use octocrab::{
     models::{
         self,
         issues::{Comment, Issue},
+        pulls::{MergeableState, PullRequest},
     },
     params,
 };
@@ -25,8 +26,8 @@ use crate::{
         crater::get_crater_queue,
     },
     model::{
-        CraterInfo, CraterStatus, FcpStatus, LoginContext, OwnPr, OwnPrStatus, Pr, PrReview,
-        PrReviewStatus, PrStatus, QueuedStatus, Repo, SharedStatus,
+        CiStatus, CraterInfo, CraterStatus, FcpStatus, LoginContext, OwnPr, OwnPrStatus, Pr,
+        PrReview, PrReviewStatus, PrStatus, QueuedStatus, Repo, SharedStatus,
     },
 };
 
@@ -280,6 +281,21 @@ async fn comments(
     Ok(res)
 }
 
+async fn pr_info(
+    config: &Arc<LoginContext>,
+    repo: &Repo,
+    pr_number: u64,
+) -> color_eyre::Result<PullRequest> {
+    let pr = config
+        .octocrab
+        .pulls(&repo.owner, &repo.name)
+        .get(pr_number)
+        .await
+        .context("get PR")?;
+
+    Ok(pr)
+}
+
 async fn process_pr(
     config: Arc<LoginContext>,
     repo: Repo,
@@ -289,13 +305,15 @@ async fn process_pr(
     own_pr: bool,
 ) -> color_eyre::Result<Option<Pr>> {
     tracing::info!("processing {}/{} {}", repo.owner, repo.name, issue.number);
-    let Some(pull_request) = issue.pull_request else {
+    let Some(_) = issue.pull_request else {
         return Ok(None);
     };
 
     let Some(body) = issue.body else {
         return Ok(None);
     };
+
+    let pr = pr_info(&config, &repo, issue.number).await?;
 
     let comments_cell = OnceCell::new();
     let get_comments = {
@@ -366,17 +384,13 @@ async fn process_pr(
         PrStatus::Own(OwnPr {
             status: if let Some(s) = shared_status().await? {
                 OwnPrStatus::Shared(s)
-            } else if let Some(bors) = &bors
-                && !bors.mergeable
-            {
-                OwnPrStatus::Conflicted
             } else if issue.labels.iter().any(|i| i.name == "S-waiting-on-review") {
                 OwnPrStatus::WaitingForReview
             } else {
                 OwnPrStatus::Pending
             },
             reviewers: issue.assignees.iter().map(|i| i.clone()).collect(),
-            wip: false,
+            draft: pr.draft.is_some_and(|i| i),
         })
     } else {
         // revieiwer
@@ -392,6 +406,13 @@ async fn process_pr(
         })
     };
 
+    tracing::info!(
+        "{} {:?} {:?}",
+        pr.title.unwrap_or_default(),
+        pr.mergeable,
+        pr.mergeable_state
+    );
+
     Ok(Some(Pr {
         repo: repo,
         number: issue.number,
@@ -402,5 +423,82 @@ async fn process_pr(
         crater_runs: Vec::new(),
         associated_issues: Vec::new(),
         status,
+        ci_state: format!(
+            "{:?}",
+            pr.mergeable_state
+                .clone()
+                .unwrap_or(MergeableState::Unknown)
+        ),
+        ci_status: match (pr.mergeable, pr.mergeable_state, bors) {
+            _ if pr.draft.is_some_and(|i| i) => CiStatus::Draft,
+            (Some(_), Some(MergeableState::Behind | MergeableState::Dirty), _) => {
+                CiStatus::Conflicted
+            }
+
+            (
+                _,
+                _,
+                Some(BorsInfo {
+                    status: BorsStatus::Approved,
+                    ..
+                }),
+            ) => CiStatus::Good,
+            (
+                _,
+                _,
+                Some(BorsInfo {
+                    status: BorsStatus::Error,
+                    ..
+                }),
+            ) => CiStatus::Bad,
+            (
+                _,
+                _,
+                Some(BorsInfo {
+                    status: BorsStatus::Failure,
+                    ..
+                }),
+            ) => CiStatus::Bad,
+            (
+                _,
+                _,
+                Some(BorsInfo {
+                    status: BorsStatus::Pending,
+                    ..
+                }),
+            ) => CiStatus::Running,
+            (
+                _,
+                _,
+                Some(BorsInfo {
+                    status: BorsStatus::Success,
+                    ..
+                }),
+            ) => CiStatus::Good,
+            (
+                _,
+                _,
+                Some(BorsInfo {
+                    status: BorsStatus::None,
+                    ..
+                }),
+            ) => CiStatus::Unknown,
+
+            // github: super unreliable
+            (None, _, _) => CiStatus::Running,
+            (Some(true), None, _) => CiStatus::Good,
+            (Some(_), Some(s), _) => match s {
+                MergeableState::Behind => CiStatus::Conflicted,
+                MergeableState::Dirty => CiStatus::Conflicted,
+                MergeableState::Blocked => CiStatus::Unknown,
+                MergeableState::Clean => CiStatus::Good,
+                MergeableState::Draft => CiStatus::Draft,
+                MergeableState::HasHooks => CiStatus::Good,
+                MergeableState::Unknown => CiStatus::Unknown,
+                MergeableState::Unstable => CiStatus::Good,
+                _ => todo!(),
+            },
+            _ => CiStatus::Unknown,
+        },
     }))
 }

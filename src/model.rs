@@ -136,7 +136,6 @@ pub struct PrReview {
 
 #[derive(Clone)]
 pub enum OwnPrStatus {
-    Conflicted,
     WaitingForReview,
     /// Ready for me to do more work on
     Pending,
@@ -147,7 +146,7 @@ pub enum OwnPrStatus {
 pub struct OwnPr {
     pub status: OwnPrStatus,
     pub reviewers: Vec<Author>,
-    pub wip: bool,
+    pub draft: bool,
 }
 
 #[derive(Clone)]
@@ -176,11 +175,37 @@ pub struct PastPerfRun {}
 pub struct PastCraterRun {}
 
 #[derive(Clone)]
+pub enum CiStatus {
+    Conflicted,
+    Good,
+    Running,
+    Bad,
+    Unknown,
+    Draft,
+}
+
+impl Render for CiStatus {
+    fn render(&self) -> Markup {
+        match self {
+            CiStatus::Conflicted => html! {"conflicted"},
+            CiStatus::Good => html! {"passing"},
+            CiStatus::Running => html! {"in progress"},
+            CiStatus::Bad => html! {"bad"},
+            CiStatus::Unknown => html! {"unknown"},
+            CiStatus::Draft => html! {"draft"},
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Pr {
     pub repo: Repo,
     pub number: u64,
 
     pub status: PrStatus,
+
+    pub ci_state: String,
+    pub ci_status: CiStatus,
 
     pub title: String,
     pub description: String,
@@ -202,7 +227,6 @@ impl Pr {
                 PrReviewStatus::Shared(shared_status) => shared_status.sort(),
             },
             PrStatus::Own(own_pr) => match &own_pr.status {
-                OwnPrStatus::Conflicted => PrBoxKind::WorkReady,
                 OwnPrStatus::WaitingForReview => PrBoxKind::Stalled,
                 OwnPrStatus::Pending => PrBoxKind::WorkReady,
                 OwnPrStatus::Shared(shared_status) => shared_status.sort(),
@@ -249,9 +273,6 @@ impl Pr {
                 PrReviewStatus::Shared(shared_status) => shared_status.stalled(),
             },
             PrStatus::Own(own_pr) => match &own_pr.status {
-                OwnPrStatus::Conflicted => Some(html! {
-                    span {"conflicts"}
-                }),
                 OwnPrStatus::WaitingForReview => Some(html! {
                     span {"waiting for review"}
                 }),

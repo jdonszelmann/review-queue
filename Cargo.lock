@@ -1992,6 +1992,7 @@ dependencies = [
  "reqwest",
  "rust-query",
  "scraper",
+ "serde",
  "tokio",
  "tower-http",
  "tracing",

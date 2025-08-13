@@ -20,3 +20,4 @@ axum-extra = { version = "0.10", features = ["cookie"] }
 jiff = "0.2"
 tower-http = { version = "0.6", features = ["fs"] }
 oauth2 = "5"
+serde = { version = "1", features = ["derive"] }

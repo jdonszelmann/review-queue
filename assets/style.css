@@ -108,30 +108,59 @@ main {
     }
 }
 
-.fields:has(.badge) {
+.fields:has(.badges) {
     margin-bottom: 2em;
 }
 
-.badge {
-    background: rgba(247, 225, 1, 0.18);
-    border-color: rgb(244, 219, 1);
-    color: rgb(244, 219, 1);
-    border: 0.005rem solid;
-
-    font-size: smaller;
-
-    margin: 0.5em;
-    padding: 0.25em 0.5em;
-    border-radius: 1em;
-
-    display: flex;
-    align-items: center;
-
-    line-height: 1em;
-
+.badges {
     position: absolute;
     right: 0;
     bottom: 0;
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    margin: 0.5em;
+    gap: 0.5em;
+
+    .ci-status {
+        width: 1em;
+        height: 1em;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        &.good {
+            color: #347d39;
+        }
+
+        &.progress {
+            color: #c69026;
+        }
+
+        &.bad {
+            color: #c93c37;
+        }
+    }
+
+    .status-badge {
+        background: rgba(247, 225, 1, 0.18);
+        border-color: rgb(244, 219, 1);
+        color: rgb(244, 219, 1);
+        border: 0.005rem solid;
+
+        font-size: smaller;
+
+        padding: 0.25em 0.5em;
+        border-radius: 1em;
+
+        display: flex;
+        align-items: center;
+
+        line-height: 1em;
+    }
 }
 
 .home {
