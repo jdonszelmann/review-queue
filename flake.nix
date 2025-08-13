@@ -29,10 +29,26 @@
         };
 
       in {
-        packages = {
-          default = naersk'.buildPackage {
+        packages = rec {
+          reviewqueue-bin = naersk'.buildPackage {
             src = ./.;
             nativeBuildInputs = with pkgs; [sqlite];
+          };
+          default = pkgs.stdenv.mkDerivation {
+            name = "reviewqueue";
+            src = ./.;
+            buildInputs = [ reviewqueue-bin ];
+            installPhase = ''
+              mkdir -p $out/bin
+
+              cat >$out/bin/reviewqueue <<EOF
+              #!/usr/bin/env bash
+              export ASSETS_DIR=${./assets}
+              ${reviewqueue-bin}/bin/reviewqueue
+              EOF
+
+              chmod +x $out/bin/reviewqueue
+            '';
           };
         };
 

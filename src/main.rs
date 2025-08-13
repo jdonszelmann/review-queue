@@ -28,6 +28,7 @@ const REFRESH_RATE: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 pub struct Config {
+    pub assets_dir: String,
     pub db_path: String,
     pub host: String,
     pub oauth_client_id: String,
@@ -95,6 +96,7 @@ async fn main() -> color_eyre::Result<()> {
 
     let config = Config {
         db_path: env::var("DB_PATH").context("get `DB_PATH` envvar")?,
+        assets_dir: env::var("ASSETS_DIR").unwrap_or("./assets".to_string()),
         host: env::var("HOST").context("get `HOST` envvar")?,
         oauth_client_id: env::var("OAUTH_CLIENT_ID").context("get `OAUTH_CLIENT_ID` envvar")?,
         oauth_client_secret: env::var("OAUTH_CLIENT_SECRET")
@@ -111,8 +113,8 @@ async fn main() -> color_eyre::Result<()> {
         .route("/queue", get(queue_page::queue_page))
         .route("/queue/ws", any(queue_page::queue_ws))
         .route("/logout", get(auth::logout))
-        .with_state(Arc::new(AppState::new(db, config)))
-        .nest_service("/assets/", ServeDir::new("assets"));
+        .with_state(Arc::new(AppState::new(db, config.clone())))
+        .nest_service("/assets/", ServeDir::new(config.assets_dir.clone()));
 
     let address = "0.0.0.0:3000";
 
