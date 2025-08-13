@@ -113,11 +113,21 @@ main {
 }
 
 .badge {
-    background: #347d39;
+    background: rgba(247, 225, 1, 0.18);
+    border-color: rgb(244, 219, 1);
+    color: rgb(244, 219, 1);
+    border: 0.005rem solid;
+
+    font-size: smaller;
 
     margin: 0.5em;
     padding: 0.25em 0.5em;
-    border-radius: 0.5em;
+    border-radius: 1em;
+
+    display: flex;
+    align-items: center;
+
+    line-height: 1em;
 
     position: absolute;
     right: 0;
