@@ -346,6 +346,10 @@ async fn process_pr(
             }
         }
 
+        if issue.labels.iter().any(|i| i.name == "S-blocked") {
+            return Ok(Some(SharedStatus::Blocked));
+        }
+
         Ok(None)
     };
 

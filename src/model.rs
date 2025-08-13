@@ -62,6 +62,7 @@ pub enum SharedStatus {
     Perf(PerfStatus),
     Crater(CraterInfo),
     Fcp(FcpStatus),
+    Blocked,
 }
 
 impl SharedStatus {
@@ -71,11 +72,15 @@ impl SharedStatus {
             SharedStatus::Perf(..) => PrBoxKind::Stalled,
             SharedStatus::Crater(..) => PrBoxKind::Stalled,
             SharedStatus::Fcp(..) => PrBoxKind::Stalled,
+            SharedStatus::Blocked => PrBoxKind::Stalled,
         }
     }
 
     pub fn stalled(&self) -> Option<Markup> {
         match self {
+            SharedStatus::Blocked => Some(html! {
+                "blocked"
+            }),
             SharedStatus::Try => todo!(),
             SharedStatus::Perf(perf_status) => todo!(),
             SharedStatus::Crater(crater_status) => match crater_status.status {
