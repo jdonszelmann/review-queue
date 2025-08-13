@@ -207,8 +207,7 @@ impl FromRequestParts<Arc<AppState>> for ExtractLoginContext {
 
         Ok(Self(Some(Arc::new(LoginContext {
             octocrab,
-            // username: user.login,
-            username: "BoxyUwU".to_string(),
+            username: user.login,
             repos: vec![Repo {
                 owner: "rust-lang".to_string(),
                 name: "rust".to_string(),
