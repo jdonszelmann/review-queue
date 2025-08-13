@@ -3,19 +3,17 @@ use axum::{
     routing::{any, get},
 };
 use color_eyre::eyre::Context;
-use jiff::Timestamp;
 use rust_query::Database;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::{env, sync::Arc, time::Duration};
-use tokio::spawn;
-use tokio::sync::Mutex;
+use tokio::sync::{OnceCell, RwLock};
 use tower_http::services::ServeDir;
 
 use crate::api::github::get_prs;
 use crate::db::Schema;
-use crate::model::{BackendStatus, LoginContext, Pr};
+use crate::model::{LoginContext, Pr};
 
 mod api;
 mod auth;
@@ -37,39 +35,49 @@ pub struct Config {
 
 #[derive(Default)]
 struct UserState {
-    prs: Vec<Pr>,
-    status: BackendStatus,
+    prs: OnceCell<Vec<Pr>>,
+    old: Vec<Pr>,
 }
 
 struct AppState {
     db: Database<Schema>,
     config: Config,
 
-    users_prs_by_username: Mutex<HashMap<String, UserState>>,
+    users_prs_by_username: RwLock<HashMap<String, UserState>>,
 }
 
 async fn get_state_instantly(config: Arc<LoginContext>) -> Vec<Pr> {
-    let mut state = config.state.users_prs_by_username.lock().await;
-    let data = state.entry(config.username.clone()).or_default();
-    data.prs.clone()
+    let state = config.state.users_prs_by_username.read().await;
+
+    state
+        .get(&config.username)
+        .map(|i| i.prs.get().cloned().unwrap_or_else(|| i.old.clone()))
+        .unwrap_or_default()
 }
 
 async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<Pr> {
     tracing::info!("refreshing for user {}", config.username);
 
-    match get_prs(config.clone()).await {
-        Err(e) => {
-            tracing::error!("{e}");
-            get_state_instantly(config).await
-        }
-        Ok(prs) => {
-            let mut state = config.state.users_prs_by_username.lock().await;
-            let data = state.entry(config.username.clone()).or_default();
-            data.prs = prs;
-            tracing::info!("done refreshing for user {}", config.username);
-            data.prs.clone()
-        }
-    }
+    {
+        let mut state = config.state.users_prs_by_username.write().await;
+        let data = state.entry(config.username.clone()).or_default();
+        data.old = data.prs.take().unwrap_or_default();
+    };
+
+    let state = config.state.users_prs_by_username.read().await;
+    let user_state = state.get(&config.username).expect("just inserted");
+
+    user_state
+        .prs
+        .get_or_init(async || match get_prs(config.clone()).await {
+            Err(e) => {
+                tracing::error!("{e}");
+                Vec::new()
+            }
+            Ok(prs) => prs,
+        })
+        .await
+        .clone()
 }
 
 impl Debug for AppState {
@@ -82,7 +90,7 @@ impl AppState {
     pub fn new(db: Database<Schema>, config: Config) -> Self {
         Self {
             db,
-            users_prs_by_username: Mutex::new(HashMap::new()),
+            users_prs_by_username: RwLock::new(HashMap::new()),
             config,
         }
     }

@@ -13,7 +13,7 @@ use futures_util::{
 };
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use octocrab::models::Author;
-use tokio::{select, time::sleep};
+use tokio::{select, spawn, time::sleep};
 
 use crate::{
     AppState, REFRESH_RATE,
@@ -85,7 +85,7 @@ pub async fn queue_ws(
             } => {}
             _ = async {
                 loop {
-                    let prs = get_and_update_state(config.clone()).await;
+                    let prs = spawn(get_and_update_state(config.clone())).await.unwrap();
                     let page = queue_page_main(&prs).await;
                     let _ = send.send(Message::Text(Utf8Bytes::from(&page.into_string()))).await;
                     sleep(REFRESH_RATE).await;
