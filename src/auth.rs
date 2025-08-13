@@ -151,8 +151,6 @@ pub async fn callback(
     };
     let access_token = token_response.access_token().secret();
 
-    tracing::info!("got access token: {}", access_token);
-
     let mut cookie = Cookie::new("github-token", access_token.clone());
     cookie.set_same_site(SameSite::Strict);
     cookie.set_path("/");
@@ -185,11 +183,9 @@ impl FromRequestParts<Arc<AppState>> for ExtractLoginContext {
             .map_err(|err| err.into_response())?;
 
         let Some(token) = jar.get("github-token") else {
-            tracing::info!("no cookies: {jar:?}");
+            tracing::debug!("no cookies: {jar:?}");
             return Ok(Self(None));
         };
-
-        tracing::info!("token: {}", token.value());
 
         let octocrab = Octocrab::builder()
             .personal_token(token.value())

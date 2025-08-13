@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use color_eyre::eyre::Context;
 use octocrab::{
@@ -20,20 +20,14 @@ use tokio::{
 };
 
 use crate::{
-    api::{
-        bors::{AllBorsInfo, BorsInfo, BorsStatus, get_bors_queue},
-        crater::get_crater_queue,
-    },
+    api::bors::{AllBorsInfo, BorsInfo, BorsStatus, get_bors_queue},
     model::{
-        CiStatus, CraterInfo, CraterStatus, FcpStatus, LoginContext, OwnPr, OwnPrStatus, Pr,
-        PrReview, PrReviewStatus, PrStatus, QueuedStatus, Repo, RollupStatus, SharedStatus,
+        CiStatus, CraterInfo, FcpStatus, LoginContext, OwnPr, OwnPrStatus, Pr, PrReview,
+        PrReviewStatus, PrStatus, QueuedStatus, Repo, RollupStatus, SharedStatus,
     },
 };
 
 pub async fn get_prs(config: Arc<LoginContext>) -> color_eyre::Result<Vec<Pr>> {
-    tracing::info!("logging in");
-    sleep(Duration::from_secs(1)).await;
-
     let (tx, mut rx) = channel(16);
 
     spawn(async move {
@@ -86,21 +80,7 @@ async fn process_repos(
             None
         };
 
-        let crater = Arc::new(SetOnce::new());
-        let inner = crater.clone();
-        spawn(async move {
-            match get_crater_queue().await {
-                Ok(i) => {
-                    inner.set(i).unwrap();
-                }
-                Err(e) => {
-                    tracing::error!("{e}");
-                    inner.set(HashMap::new()).unwrap();
-                }
-            }
-        });
-
-        tracing::info!("getting prs and issues for {}/{}", repo.owner, repo.name);
+        tracing::debug!("getting prs and issues for {}/{}", repo.owner, repo.name);
 
         let author = process_issues(
             config.clone(),
@@ -118,7 +98,6 @@ async fn process_repos(
                     .context("author issues")
             },
             bors.clone(),
-            crater.clone(),
             tx.clone(),
             true,
         );
@@ -139,7 +118,6 @@ async fn process_repos(
                     .context("author issues")
             },
             bors.clone(),
-            crater.clone(),
             tx.clone(),
             false,
         );
@@ -159,20 +137,17 @@ async fn process_issues<F: Future<Output = color_eyre::Result<Page<Issue>>>>(
     config: Arc<LoginContext>,
     issues: impl Fn() -> F,
     bors: Option<Arc<SetOnce<AllBorsInfo>>>,
-    crater: Arc<SetOnce<HashMap<u64, CraterStatus>>>,
     tx: Sender<color_eyre::Result<Pr>>,
     own_pr: bool,
 ) -> color_eyre::Result<()> {
     for repo in config.repos.clone() {
-        tracing::info!("getting prs and issues for {}/{}", repo.owner, repo.name);
-
         let mut ctr = 0;
         let mut page = loop {
             let page = issues().await?;
 
             if page.total_count.is_none() && page.items.is_empty() {
                 // let rate_limit = octocrab.ratelimit().get().await.context("rate limit")?;
-                tracing::info!("waiting...");
+                tracing::debug!("waiting...");
                 ctr += 1;
                 sleep(Duration::from_millis(50)).await;
 
@@ -191,7 +166,7 @@ async fn process_issues<F: Future<Output = color_eyre::Result<Page<Issue>>>>(
         let mut n = 1;
 
         loop {
-            tracing::info!("page {n}");
+            tracing::debug!("page {n}");
             n += 1;
 
             let next = page.next.clone();
@@ -200,10 +175,9 @@ async fn process_issues<F: Future<Output = color_eyre::Result<Page<Issue>>>>(
                 let tx = tx.clone();
                 let repo = repo.clone();
                 let bors = bors.clone();
-                let crater = crater.clone();
                 let config = config.clone();
                 spawn(async move {
-                    match process_pr(config, repo, bors, crater, issue, own_pr).await {
+                    match process_pr(config, repo, bors, issue, own_pr).await {
                         Ok(Some(i)) => {
                             tx.send(Ok(i)).await.unwrap();
                         }
@@ -229,7 +203,7 @@ async fn comments(
     repo: Repo,
     issue_number: u64,
 ) -> color_eyre::Result<Vec<Comment>> {
-    tracing::info!(
+    tracing::debug!(
         "getting comments for {}/{}#{}",
         repo.owner,
         repo.name,
@@ -248,7 +222,7 @@ async fn comments(
             .await?;
 
         if page.total_count.is_none() && page.items.is_empty() {
-            tracing::info!("waiting...");
+            tracing::debug!("waiting...");
             sleep(Duration::from_millis(50)).await;
             continue;
         }
@@ -261,7 +235,7 @@ async fn comments(
     let mut n = 1;
 
     loop {
-        tracing::info!("page {n}");
+        tracing::debug!("page {n}");
         n += 1;
 
         let next = page.next.clone();
@@ -301,11 +275,10 @@ async fn process_pr(
     config: Arc<LoginContext>,
     repo: Repo,
     bors: Option<Arc<SetOnce<AllBorsInfo>>>,
-    crater: Arc<SetOnce<HashMap<u64, CraterStatus>>>,
     issue: Issue,
     own_pr: bool,
 ) -> color_eyre::Result<Option<Pr>> {
-    tracing::info!("processing {}/{} {}", repo.owner, repo.name, issue.number);
+    tracing::debug!("processing {}/{} {}", repo.owner, repo.name, issue.number);
     let Some(_) = issue.pull_request else {
         return Ok(None);
     };
@@ -319,7 +292,7 @@ async fn process_pr(
     let comments_cell = OnceCell::new();
     let get_comments = {
         let repo = repo.clone();
-        || comments_cell.get_or_try_init(|| comments(config, repo, issue.number))
+        || comments_cell.get_or_try_init(|| comments(config.clone(), repo, issue.number))
     };
 
     let bors = if let Some(bors) = bors
@@ -331,6 +304,7 @@ async fn process_pr(
         None
     };
 
+    let local_config = config.clone();
     let shared_status = async || -> color_eyre::Result<Option<SharedStatus>> {
         if issue
             .labels
@@ -353,13 +327,19 @@ async fn process_pr(
             }
 
             if let Some(start) = fcp_start {
-                tracing::info!("fcp start at {start}");
+                tracing::debug!("fcp start at {start}");
                 return Ok(Some(SharedStatus::Fcp(FcpStatus { start })));
             }
         }
 
         if issue.labels.iter().any(|i| i.name == "S-waiting-on-crater") {
-            if let Some(status) = crater.wait().await.get(&issue.number) {
+            if let Some(status) = local_config
+                .state
+                .crater_info
+                .get()
+                .await
+                .get(&issue.number)
+            {
                 return Ok(Some(SharedStatus::Crater(CraterInfo {
                     status: status.clone(),
                 })));

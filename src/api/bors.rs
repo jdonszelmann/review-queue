@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
 use color_eyre::eyre::Context;
-use octocrab::Octocrab;
 use scraper::{ElementRef, Html, Selector};
 use url::Url;
 
@@ -30,6 +29,7 @@ pub enum RollupSetting {
 }
 
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct BorsInfo {
     pub approver: String,
     pub status: BorsStatus,
@@ -42,6 +42,7 @@ pub struct BorsInfo {
 }
 
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct Rollup {
     pub pr_number: u64,
     pub running: bool,
@@ -60,7 +61,7 @@ pub async fn get_bors_queue(
     repo: Repo,
     url: Url,
 ) -> color_eyre::Result<AllBorsInfo> {
-    tracing::info!("reading bors page at {url}");
+    // tracing::info!("reading bors page at {url}");
 
     let mut pr_numbers = Vec::new();
     let mut prs = HashMap::new();
@@ -101,6 +102,7 @@ pub async fn get_bors_queue(
                 "failure" => BorsStatus::Failure,
                 "approved" => BorsStatus::Approved,
                 "pending" => BorsStatus::Pending,
+                "success" => BorsStatus::Success,
                 other => BorsStatus::Other(other.to_string()),
             };
 

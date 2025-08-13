@@ -8,7 +8,7 @@ use crate::model::CraterStatus;
 
 pub async fn get_crater_queue() -> color_eyre::Result<HashMap<u64, CraterStatus>> {
     let url = "https://crater.rust-lang.org/";
-    tracing::info!("reading crater page at {url}");
+    // tracing::info!("reading crater page at {url}");
 
     let mut results = HashMap::new();
     let response = reqwest::get(url).await?;

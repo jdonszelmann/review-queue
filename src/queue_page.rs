@@ -1,25 +1,20 @@
-use std::sync::Arc;
-
 use axum::{
     extract::{
-        State, WebSocketUpgrade,
+        WebSocketUpgrade,
         ws::{Message, Utf8Bytes},
     },
     response::{IntoResponse, Redirect, Response},
 };
-use futures_util::{
-    sink::SinkExt,
-    stream::{SplitSink, SplitStream, StreamExt},
-};
+use futures_util::{sink::SinkExt, stream::StreamExt};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use octocrab::models::Author;
 use tokio::{select, spawn, time::sleep};
 
 use crate::{
-    AppState, REFRESH_RATE,
+    REFRESH_RATE,
     auth::ExtractLoginContext,
     get_and_update_state, get_state_instantly,
-    model::{BackendStatus, CiStatus, LoginContext, Pr, PrBoxKind},
+    model::{CiStatus, Pr, PrBoxKind},
 };
 
 const CHECKMARK: PreEscaped<&str> = PreEscaped(
@@ -110,7 +105,6 @@ pub async fn queue_page_main(prs: &[Pr]) -> Markup {
 }
 
 pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Response {
-    tracing::info!("{config:?}");
     let Some(config) = config else {
         return Redirect::to("/").into_response();
     };

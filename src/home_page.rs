@@ -1,20 +1,17 @@
 use std::sync::Arc;
 
 use axum::{
-    body::Body,
     extract::State,
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect},
 };
-use maud::{Markup, html};
+use maud::html;
 
 use crate::{AppState, auth::ExtractLoginContext, queue_page::page_template};
 
-#[axum::debug_handler]
 pub async fn home_page(
-    State(state): State<Arc<AppState>>,
+    State(..): State<Arc<AppState>>,
     ExtractLoginContext(config): ExtractLoginContext,
 ) -> impl IntoResponse {
-    tracing::info!("{config:?}");
     if config.is_some() {
         return Redirect::to("/queue").into_response();
     }

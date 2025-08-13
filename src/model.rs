@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use jiff::{SignedDuration, Span, SpanRound, Timestamp, Unit};
@@ -83,7 +85,7 @@ impl SharedStatus {
                 "blocked"
             }),
             SharedStatus::Try => todo!(),
-            SharedStatus::Perf(perf_status) => todo!(),
+            SharedStatus::Perf(..) => todo!(),
             SharedStatus::Crater(crater_status) => match crater_status.status {
                 CraterStatus::Queued { num_before } => Some(html! {
                     (format!("in crater queue ({} queued before this)", num_before))

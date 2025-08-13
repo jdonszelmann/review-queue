@@ -11,9 +11,12 @@ use std::{env, sync::Arc, time::Duration};
 use tokio::sync::{OnceCell, RwLock};
 use tower_http::services::ServeDir;
 
-use crate::api::github::get_prs;
-use crate::db::Schema;
 use crate::model::{LoginContext, Pr};
+use crate::{api::crater::get_crater_queue, db::Schema};
+use crate::{
+    api::{Cache, github::get_prs},
+    model::CraterStatus,
+};
 
 mod api;
 mod auth;
@@ -42,6 +45,8 @@ struct UserState {
 struct AppState {
     db: Database<Schema>,
     config: Config,
+
+    crater_info: Cache<'static, HashMap<u64, CraterStatus>>,
 
     users_prs_by_username: RwLock<HashMap<String, UserState>>,
 }
@@ -92,6 +97,19 @@ impl AppState {
             db,
             users_prs_by_username: RwLock::new(HashMap::new()),
             config,
+            crater_info: Cache::new(
+                async || {
+                    tracing::info!("reloading crater");
+                    match get_crater_queue().await {
+                        Ok(i) => i,
+                        Err(e) => {
+                            tracing::error!("crater error: {e}");
+                            Default::default()
+                        }
+                    }
+                },
+                Duration::from_secs(60 * 10),
+            ),
         }
     }
 }
