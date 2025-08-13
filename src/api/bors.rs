@@ -28,7 +28,7 @@ pub struct BorsInfo {
     approver: String,
     pub status: BorsStatus,
     pub mergeable: bool,
-    pub rollup_status: RollupSetting,
+    pub rollup_setting: RollupSetting,
     pub priority: u64,
 }
 
@@ -98,7 +98,7 @@ pub async fn get_bors_queue(url: Url) -> color_eyre::Result<HashMap<u64, BorsInf
             approver: approver.trim().to_string(),
             status,
             mergeable,
-            rollup_status,
+            rollup_setting: rollup_status,
             priority,
         };
         results.insert(number, info);

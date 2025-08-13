@@ -7,6 +7,7 @@ use url::Url;
 
 use crate::{
     AppState,
+    api::bors::RollupSetting,
     queue_page::{field, render_author},
 };
 
@@ -146,7 +147,6 @@ pub enum OwnPrStatus {
 pub struct OwnPr {
     pub status: OwnPrStatus,
     pub reviewers: Vec<Author>,
-    pub draft: bool,
 }
 
 #[derive(Clone)]
@@ -159,6 +159,7 @@ pub enum RollupStatus {
 pub struct QueuedStatus {
     pub author: Author,
     pub approvers: Vec<Author>,
+    pub rollup_setting: RollupSetting,
 }
 
 #[derive(Clone)]
@@ -216,10 +217,15 @@ pub struct Pr {
     pub crater_runs: Vec<PastPerfRun>,
 
     pub associated_issues: Vec<()>,
+    pub draft: bool,
 }
 
 impl Pr {
     pub fn sort(&self) -> PrBoxKind {
+        if self.draft {
+            return PrBoxKind::Draft;
+        }
+
         match &self.status {
             PrStatus::Review(pr_review) => match &pr_review.status {
                 PrReviewStatus::Author => PrBoxKind::Stalled,
@@ -280,7 +286,17 @@ impl Pr {
                 OwnPrStatus::Shared(shared_status) => shared_status.stalled(),
             },
             PrStatus::Rollup(rollup_status) => None,
-            PrStatus::Queued(queued_status) => None,
+            PrStatus::Queued(QueuedStatus {
+                author,
+                approvers,
+                rollup_setting: RollupSetting::Iffy,
+            }) => Some(html! { span{"rollup=iffy"} }),
+            PrStatus::Queued(QueuedStatus {
+                author,
+                approvers,
+                rollup_setting: RollupSetting::Never,
+            }) => Some(html! { span{"rollup=never"} }),
+            PrStatus::Queued(..) => None,
         }
     }
 }
@@ -310,6 +326,7 @@ impl Render for BackendStatus {
 
 #[derive(PartialEq)]
 pub enum PrBoxKind {
+    Draft,
     Stalled,
     WorkReady,
     TodoReview,
@@ -320,6 +337,7 @@ pub enum PrBoxKind {
 impl Render for PrBoxKind {
     fn render(&self) -> Markup {
         match self {
+            PrBoxKind::Draft => html! {span {"Draft"}},
             PrBoxKind::Stalled => html! {span {"Waiting"}},
             PrBoxKind::TodoReview => html! {span {"Waiting for my review"}},
             PrBoxKind::Other => html! {span {"Other"}},

@@ -96,6 +96,7 @@ pub async fn queue_page(
             (render_pr_box(config.clone(), PrBoxKind::TodoReview).await)
             (render_pr_box(config.clone(), PrBoxKind::Stalled).await)
             (render_pr_box(config.clone(), PrBoxKind::Queue).await)
+            (render_pr_box(config.clone(), PrBoxKind::Draft).await)
             (render_pr_box(config.clone(), PrBoxKind::Other).await)
         }
 
@@ -149,7 +150,7 @@ pub fn render_badges(pr: &Pr) -> Markup {
 
     match pr.ci_status {
         CiStatus::Conflicted => badges.push(html! {
-            div class="ci-status conflict" title=(pr.ci_status) { (WARN) }
+            div class="ci-status conflict" title=(pr.ci_status) { (WARN) "conflict" }
         }),
         CiStatus::Good => badges.push(html! {
             div class="ci-status good" title=(pr.ci_status) { (CHECKMARK) }
@@ -180,7 +181,13 @@ pub fn render_badges(pr: &Pr) -> Markup {
 pub async fn render_pr(pr: &Pr) -> Markup {
     html! {
         div class="pr" {
-            h2 class="title" { a target="_blank" rel="noopener noreferrer" href=(pr.link) { (pr.title)}}
+            h2 class="title" { a target="_blank" rel="noopener noreferrer" href=(pr.link) {
+                (pr.title)
+            }}
+
+            a class="pr-link" href=(pr.link) {
+                (pr.repo.owner) "/" (pr.repo.name) "#" (pr.number)
+            }
 
             div class="fields" {
                 @if let Some(a) = pr.author() {
@@ -192,7 +199,7 @@ pub async fn render_pr(pr: &Pr) -> Markup {
 
                 (render_badges(pr))
 
-                (pr.ci_state)
+                // (pr.ci_state)
             }
         }
     }

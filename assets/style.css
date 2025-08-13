@@ -70,27 +70,22 @@ main {
     padding-bottom: 1em;
 
     h2 {
-        font-size: large;
+        font-size: medium;
+        margin-bottom: 0;
     }
 
     min-height: 10em;
 
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    gap: 0;
 
     position: relative;
-}
 
-.field {
-    font-size: large;
-
-    display: flex;
-    flex-direction: row;
-    width: 100%;
-
-    .value {
-        margin-left: auto;
+    .pr-link {
+        margin-top: 0;
+        font-size: small;
+        margin-bottom: 1em;
     }
 }
 
@@ -108,14 +103,28 @@ main {
     }
 }
 
-.fields:has(.badges) {
+.fields {
+    margin-top: auto;
     margin-bottom: 2em;
+
+    .field {
+        font-size: small;
+
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+
+        .value {
+            margin-left: auto;
+        }
+    }
 }
 
 .badges {
     position: absolute;
     right: 0;
     bottom: 0;
+    font-size: x-small;
 
     display: flex;
     flex-direction: row;
@@ -125,23 +134,25 @@ main {
     gap: 0.5em;
 
     .ci-status {
-        width: 1em;
-        height: 1em;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
+        min-width: 1em;
 
         &.good {
             color: #347d39;
+            font-size: medium;
         }
 
         &.progress {
             color: #c69026;
+            font-size: medium;
         }
 
         &.bad {
             color: #c93c37;
+            font-size: medium;
         }
     }
 
@@ -151,10 +162,8 @@ main {
         color: rgb(244, 219, 1);
         border: 0.005rem solid;
 
-        font-size: smaller;
-
-        padding: 0.25em 0.5em;
-        border-radius: 1em;
+        padding: 0.2em 0.5em;
+        border-radius: 0.8em;
 
         display: flex;
         align-items: center;

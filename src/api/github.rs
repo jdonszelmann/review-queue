@@ -378,6 +378,7 @@ async fn process_pr(
             // TODO: make this the bors approver
             approvers: issue.assignees.iter().map(|i| i.clone()).collect(),
             author: issue.user,
+            rollup_setting: bors.rollup_setting.clone(),
         })
     } else if own_pr {
         // creator
@@ -390,7 +391,6 @@ async fn process_pr(
                 OwnPrStatus::Pending
             },
             reviewers: issue.assignees.iter().map(|i| i.clone()).collect(),
-            draft: pr.draft.is_some_and(|i| i),
         })
     } else {
         // revieiwer
@@ -406,13 +406,6 @@ async fn process_pr(
         })
     };
 
-    tracing::info!(
-        "{} {:?} {:?}",
-        pr.title.unwrap_or_default(),
-        pr.mergeable,
-        pr.mergeable_state
-    );
-
     Ok(Some(Pr {
         repo: repo,
         number: issue.number,
@@ -422,6 +415,7 @@ async fn process_pr(
         perf_runs: Vec::new(),
         crater_runs: Vec::new(),
         associated_issues: Vec::new(),
+        draft: pr.draft.is_some_and(|i| i),
         status,
         ci_state: format!(
             "{:?}",
