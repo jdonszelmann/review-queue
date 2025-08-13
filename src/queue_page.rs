@@ -1,16 +1,24 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
+    extract::{
+        State, WebSocketUpgrade,
+        ws::{Message, Utf8Bytes},
+    },
     response::{IntoResponse, Redirect, Response},
+};
+use futures_util::{
+    sink::SinkExt,
+    stream::{SplitSink, SplitStream, StreamExt},
 };
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use octocrab::models::Author;
+use tokio::{select, time::sleep};
 
 use crate::{
     AppState, REFRESH_RATE,
     auth::ExtractLoginContext,
-    get_and_update_state,
+    get_and_update_state, get_state_instantly,
     model::{BackendStatus, CiStatus, LoginContext, Pr, PrBoxKind},
 };
 
@@ -60,27 +68,64 @@ pub fn page_template(body: Markup) -> Markup {
     }
 }
 
-pub async fn queue_page(
-    State(state): State<Arc<AppState>>,
+pub async fn queue_ws(
     ExtractLoginContext(config): ExtractLoginContext,
+    ws: WebSocketUpgrade,
 ) -> Response {
+    let Some(config) = config else {
+        return Redirect::to("/").into_response();
+    };
+
+    ws.on_upgrade(async move |socket| {
+        let (mut send, mut recv) = socket.split();
+
+        select! {
+            _ = async {
+                while let Some(_) = recv.next().await {}
+            } => {}
+            _ = async {
+                loop {
+                    let prs = get_and_update_state(config.clone()).await;
+                    let page = queue_page_main(&prs).await;
+                    let _ = send.send(Message::Text(Utf8Bytes::from(&page.into_string()))).await;
+                    sleep(REFRESH_RATE).await;
+                }
+            } => {}
+        };
+    })
+    .into_response()
+}
+
+pub async fn queue_page_main(prs: &[Pr]) -> Markup {
+    html! {
+        main id="main" {
+            (render_pr_box(prs, PrBoxKind::WorkReady).await)
+            (render_pr_box(prs, PrBoxKind::TodoReview).await)
+            (render_pr_box(prs, PrBoxKind::Stalled).await)
+            (render_pr_box(prs, PrBoxKind::Queue).await)
+            (render_pr_box(prs, PrBoxKind::Draft).await)
+            (render_pr_box(prs, PrBoxKind::Other).await)
+        }
+    }
+}
+
+pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Response {
     tracing::info!("{config:?}");
     let Some(config) = config else {
         return Redirect::to("/").into_response();
     };
 
-    let backend_state = state
-        .users_prs_by_username
-        .lock()
-        .await
-        .get(&config.username)
-        .map(|i| i.status.clone())
-        .unwrap_or(BackendStatus::Uninitialized);
+    let prs = get_state_instantly(config.clone()).await;
+
+    let ws_url = format!(
+        "{}/queue/ws",
+        config.state.config.host.replace("http", "ws") //http -> ws, https -> wss
+    );
 
     page_template(html! {
         nav {
             div class="backend-status" {
-                span {"backend status: "} span{(backend_state)}
+                span {"last refreshed: "} span id="refresh-time" {"never (the first refresh can take a few seconds)"}
             }
 
             div class="divider" {}
@@ -91,32 +136,31 @@ pub async fn queue_page(
                 }
             }
         }
-        main {
-            (render_pr_box(config.clone(), PrBoxKind::WorkReady).await)
-            (render_pr_box(config.clone(), PrBoxKind::TodoReview).await)
-            (render_pr_box(config.clone(), PrBoxKind::Stalled).await)
-            (render_pr_box(config.clone(), PrBoxKind::Queue).await)
-            (render_pr_box(config.clone(), PrBoxKind::Draft).await)
-            (render_pr_box(config.clone(), PrBoxKind::Other).await)
-        }
+
+        (queue_page_main(&prs).await)
 
         script {
             (PreEscaped(format!(r#"
-                setTimeout(() => {{
-                    window.location.reload();
-                }}, {})
-            "#, REFRESH_RATE.as_millis() / 4)))
+                const socket = new WebSocket("{ws_url}");
+                socket.addEventListener("message", (event) => {{
+                    console.log("replacing main");
+                    document.getElementById("main").outerHTML = event.data;
+
+                    const d = new Date();
+                    const n = d.toLocaleTimeString();
+                    document.getElementById("refresh-time").innerText = n;
+                }});
+            "#)))
         }
     })
     .into_response()
 }
 
-pub async fn render_pr_box(config: Arc<LoginContext>, kind: PrBoxKind) -> Markup {
-    let prs = get_and_update_state(config).await;
-
+pub async fn render_pr_box(prs: &[Pr], kind: PrBoxKind) -> Markup {
     let mut prs = prs
-        .into_iter()
+        .iter()
         .filter(|pr| pr.sort() == kind)
+        .cloned()
         .collect::<Vec<_>>();
 
     if prs.is_empty() {

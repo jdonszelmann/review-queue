@@ -15,9 +15,10 @@ url = "2"
 reqwest = "0.12"
 scraper = "0.23"
 maud = { version = "0.27", features = ["axum"] }
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 jiff = "0.2"
 tower-http = { version = "0.6", features = ["fs"] }
 oauth2 = "5"
 serde = { version = "1", features = ["derive"] }
+futures-util = "0.3"

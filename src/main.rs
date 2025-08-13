@@ -1,6 +1,7 @@
-use axum::response::Redirect;
-use axum::{Router, routing::get};
-use axum_extra::extract::CookieJar;
+use axum::{
+    Router,
+    routing::{any, get},
+};
 use color_eyre::eyre::Context;
 use jiff::Timestamp;
 use rust_query::Database;
@@ -8,14 +9,13 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::{env, sync::Arc, time::Duration};
+use tokio::spawn;
 use tokio::sync::Mutex;
-use tokio::{spawn, time::sleep};
 use tower_http::services::ServeDir;
-use url::Url;
 
 use crate::api::github::get_prs;
 use crate::db::Schema;
-use crate::model::{BackendStatus, LoginContext, Pr, Repo};
+use crate::model::{BackendStatus, LoginContext, Pr};
 
 mod api;
 mod auth;
@@ -47,41 +47,28 @@ struct AppState {
     users_prs_by_username: Mutex<HashMap<String, UserState>>,
 }
 
+async fn get_state_instantly(config: Arc<LoginContext>) -> Vec<Pr> {
+    let mut state = config.state.users_prs_by_username.lock().await;
+    let data = state.entry(config.username.clone()).or_default();
+    data.prs.clone()
+}
+
 async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<Pr> {
-    let prs = {
-        let mut state = config.state.users_prs_by_username.lock().await;
-        let data = state.entry(config.username.clone()).or_default();
-
-        match data.status {
-            BackendStatus::Idle { last_refresh }
-                if Timestamp::now().duration_since(last_refresh).unsigned_abs() > REFRESH_RATE => {}
-            BackendStatus::Uninitialized => {}
-            BackendStatus::Refreshing | BackendStatus::Idle { .. } => return data.prs.clone(),
-        }
-
-        data.status = BackendStatus::Refreshing;
-        data.prs.clone()
-    };
-
     tracing::info!("refreshing for user {}", config.username);
 
-    spawn(async move {
-        match get_prs(config.clone()).await {
-            Err(e) => tracing::error!("{e}"),
-            Ok(prs) => {
-                let mut state = config.state.users_prs_by_username.lock().await;
-                let data = state.entry(config.username.clone()).or_default();
-
-                data.status = BackendStatus::Idle {
-                    last_refresh: Timestamp::now(),
-                };
-                data.prs = prs;
-                tracing::info!("done refreshing for user {}", config.username);
-            }
+    match get_prs(config.clone()).await {
+        Err(e) => {
+            tracing::error!("{e}");
+            get_state_instantly(config).await
         }
-    });
-
-    prs
+        Ok(prs) => {
+            let mut state = config.state.users_prs_by_username.lock().await;
+            let data = state.entry(config.username.clone()).or_default();
+            data.prs = prs;
+            tracing::info!("done refreshing for user {}", config.username);
+            data.prs.clone()
+        }
+    }
 }
 
 impl Debug for AppState {
@@ -122,6 +109,7 @@ async fn main() -> color_eyre::Result<()> {
         .route("/auth/github/login", get(auth::login))
         .route("/auth/github/callback", get(auth::callback))
         .route("/queue", get(queue_page::queue_page))
+        .route("/queue/ws", any(queue_page::queue_ws))
         .route("/logout", get(auth::logout))
         .with_state(Arc::new(AppState::new(db, config)))
         .nest_service("/assets/", ServeDir::new("assets"));

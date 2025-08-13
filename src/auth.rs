@@ -58,7 +58,7 @@ macro_rules! get_client {
     };
 }
 
-pub async fn logout(State(state): State<Arc<AppState>>, jar: CookieJar) -> impl IntoResponse {
+pub async fn logout(State(_): State<Arc<AppState>>, jar: CookieJar) -> impl IntoResponse {
     (jar.remove("github-token"), Redirect::to("/"))
 }
 
