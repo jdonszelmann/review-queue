@@ -29,9 +29,11 @@
         };
 
       in {
-        defaultPackage = naersk'.buildPackage {
-          src = ./.;
-          nativeBuildInputs = with pkgs; [sqlite];
+        packages = {
+          default = naersk'.buildPackage {
+            src = ./.;
+            nativeBuildInputs = with pkgs; [sqlite];
+          };
         };
 
         devShell = pkgs.mkShell {
