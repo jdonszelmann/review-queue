@@ -191,7 +191,7 @@ impl Render for CiStatus {
             CiStatus::Conflicted => html! {"conflicted"},
             CiStatus::Good => html! {"passing"},
             CiStatus::Running => html! {"in progress"},
-            CiStatus::Bad => html! {"bad"},
+            CiStatus::Bad => html! {"failing"},
             CiStatus::Unknown => html! {"unknown"},
             CiStatus::Draft => html! {"draft"},
         }
