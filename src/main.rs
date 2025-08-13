@@ -90,7 +90,7 @@ impl AppState {
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
-    dotenvy::dotenv().context("get dotenv")?;
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
 
     let config = Config {
