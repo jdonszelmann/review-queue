@@ -8,6 +8,7 @@ use tokio::{
 pub mod bors;
 pub mod crater;
 pub mod github;
+pub mod rfcbot;
 
 pub struct Cache<'a, T: 'a> {
     f: Box<dyn 'a + Send + Sync + Fn() -> Pin<Box<dyn 'a + Send + Sync + Future<Output = T>>>>,

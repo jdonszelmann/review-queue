@@ -11,11 +11,14 @@ use std::{env, sync::Arc, time::Duration};
 use tokio::sync::{OnceCell, RwLock};
 use tower_http::services::ServeDir;
 
-use crate::db::Issue;
-use crate::{api::crater::get_crater_queue, db::Schema};
+use crate::{api::rfcbot::FcpInfoAll, db::Issue};
 use crate::{
     api::{Cache, github::scrape_pr_data},
     model::CraterStatus,
+};
+use crate::{
+    api::{crater::get_crater_queue, rfcbot::get_fcp_info},
+    db::Schema,
 };
 use crate::{
     db::User,
@@ -49,6 +52,7 @@ struct AppState {
     config: Config,
 
     crater_info: Cache<'static, HashMap<u64, CraterStatus>>,
+    fcp_info: Cache<'static, FcpInfoAll>,
 
     users_prs_by_username: RwLock<HashMap<String, UserState>>,
 }
@@ -150,6 +154,19 @@ impl AppState {
                     }
                 },
                 Duration::from_secs(60 * 10),
+            ),
+            fcp_info: Cache::new(
+                async || {
+                    tracing::info!("reloading fcp");
+                    match get_fcp_info().await {
+                        Ok(i) => i,
+                        Err(e) => {
+                            tracing::error!("crater error: {e}");
+                            Default::default()
+                        }
+                    }
+                },
+                Duration::from_secs(30),
             ),
         }
     }

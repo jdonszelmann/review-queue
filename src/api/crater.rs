@@ -6,12 +6,11 @@ use scraper::{ElementRef, Html, Selector};
 
 use crate::model::CraterStatus;
 
-pub async fn get_crater_queue() -> color_eyre::Result<HashMap<u64, CraterStatus>> {
-    let url = "https://crater.rust-lang.org/";
-    // tracing::info!("reading crater page at {url}");
+const URL: &str = "https://crater.rust-lang.org/";
 
+pub async fn get_crater_queue() -> color_eyre::Result<HashMap<u64, CraterStatus>> {
     let mut results = HashMap::new();
-    let response = reqwest::get(url).await?;
+    let response = reqwest::get(URL).await?;
     let body = response.text().await.context("body")?;
 
     let document = Html::parse_document(&body);
