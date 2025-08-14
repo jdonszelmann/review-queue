@@ -161,7 +161,7 @@ pub async fn render_pr_box(prs: &[Pr], kind: PrBoxKind) -> Markup {
         return html! {};
     }
 
-    prs.sort_by_cached_key(|pr| pr.title.clone());
+    prs.sort_by_cached_key(|pr| pr.created);
 
     html! {
         div class="prbox" {

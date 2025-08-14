@@ -309,6 +309,14 @@ async fn process_pr(
         if issue
             .labels
             .iter()
+            .any(|i| i.name == "S-waiting-on-concerns")
+        {
+            return Ok(Some(SharedStatus::FcpConcerns));
+        }
+
+        if issue
+            .labels
+            .iter()
             .any(|i| i.name == "final-comment-period")
         {
             let comments = get_comments().await?;
@@ -422,6 +430,7 @@ async fn process_pr(
         perf_runs: Vec::new(),
         crater_runs: Vec::new(),
         associated_issues: Vec::new(),
+        created: jiff::Timestamp::from_second(issue.created_at.timestamp()).unwrap(),
         draft: pr.draft.is_some_and(|i| i),
         status,
         ci_state: format!(

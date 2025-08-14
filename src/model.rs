@@ -61,6 +61,7 @@ pub struct CraterInfo {
 
 #[derive(Clone)]
 pub enum SharedStatus {
+    FcpConcerns,
     Try,
     Perf(PerfStatus),
     Crater(CraterInfo),
@@ -76,6 +77,7 @@ impl SharedStatus {
             SharedStatus::Crater(..) => PrBoxKind::Stalled,
             SharedStatus::Fcp(..) => PrBoxKind::Stalled,
             SharedStatus::Blocked => PrBoxKind::Stalled,
+            SharedStatus::FcpConcerns => PrBoxKind::Stalled,
         }
     }
 
@@ -83,6 +85,9 @@ impl SharedStatus {
         match self {
             SharedStatus::Blocked => Some(html! {
                 "blocked"
+            }),
+            Self::FcpConcerns => Some(html! {
+                "FCP concerns"
             }),
             SharedStatus::Try => todo!(),
             SharedStatus::Perf(..) => todo!(),
@@ -117,7 +122,7 @@ impl SharedStatus {
                     .days_are_24_hours();
 
                 Some(html! {
-                    span {(format!("fcp ends in {:#}", span.round(options).unwrap()))}
+                    span {(format!("FCP ends in {:#}", span.round(options).unwrap()))}
                 })
             }
         }
@@ -223,6 +228,8 @@ pub struct Pr {
 
     pub associated_issues: Vec<()>,
     pub draft: bool,
+
+    pub created: Timestamp,
 }
 
 impl Pr {
