@@ -12,7 +12,7 @@ use tokio::{select, spawn, time::sleep};
 
 use crate::{
     REFRESH_RATE, get_and_update_state, get_state_instantly,
-    model::{CiStatus, Pr, PrBoxKind},
+    model::{CiStatus, Pr, PrSortCategory},
     pages::auth::ExtractLoginContext,
 };
 
@@ -93,12 +93,12 @@ pub async fn queue_ws(
 pub async fn queue_page_main(prs: &[Pr]) -> Markup {
     html! {
         main id="main" {
-            (render_pr_box(prs, PrBoxKind::WorkReady).await)
-            (render_pr_box(prs, PrBoxKind::TodoReview).await)
-            (render_pr_box(prs, PrBoxKind::Stalled).await)
-            (render_pr_box(prs, PrBoxKind::Queue).await)
-            (render_pr_box(prs, PrBoxKind::Draft).await)
-            (render_pr_box(prs, PrBoxKind::Other).await)
+            (render_pr_box(prs, PrSortCategory::WorkReady).await)
+            (render_pr_box(prs, PrSortCategory::TodoReview).await)
+            (render_pr_box(prs, PrSortCategory::Stalled).await)
+            (render_pr_box(prs, PrSortCategory::Queue).await)
+            (render_pr_box(prs, PrSortCategory::Draft).await)
+            (render_pr_box(prs, PrSortCategory::Other).await)
         }
     }
 }
@@ -149,7 +149,7 @@ pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Res
     .into_response()
 }
 
-pub async fn render_pr_box(prs: &[Pr], kind: PrBoxKind) -> Markup {
+pub async fn render_pr_box(prs: &[Pr], kind: PrSortCategory) -> Markup {
     let mut prs = prs
         .iter()
         .filter(|pr| pr.sort() == kind)

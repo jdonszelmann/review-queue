@@ -27,11 +27,11 @@ use crate::{
     },
 };
 
-pub async fn get_prs(config: Arc<LoginContext>) -> color_eyre::Result<Vec<Pr>> {
+pub async fn scrape_pr_data(config: Arc<LoginContext>) -> color_eyre::Result<Vec<Pr>> {
     let (tx, mut rx) = channel(16);
 
     spawn(async move {
-        if let Err(e) = process_repos(config, tx.clone()).await {
+        if let Err(e) = scrape_each_repo(config, tx.clone()).await {
             tx.send(Err(e)).await.unwrap();
         }
     });
@@ -52,7 +52,7 @@ pub async fn get_prs(config: Arc<LoginContext>) -> color_eyre::Result<Vec<Pr>> {
     Ok(res)
 }
 
-async fn process_repos(
+async fn scrape_each_repo(
     config: Arc<LoginContext>,
     tx: Sender<color_eyre::Result<Pr>>,
 ) -> color_eyre::Result<()> {

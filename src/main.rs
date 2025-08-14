@@ -14,7 +14,7 @@ use tower_http::services::ServeDir;
 use crate::db::{Issue, MacroRoot};
 use crate::{api::crater::get_crater_queue, db::Schema};
 use crate::{
-    api::{Cache, github::get_prs},
+    api::{Cache, github::scrape_pr_data},
     model::CraterStatus,
 };
 use crate::{
@@ -113,7 +113,7 @@ async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<Pr> {
 
     user_state
         .prs
-        .get_or_init(async || match get_prs(config.clone()).await {
+        .get_or_init(async || match scrape_pr_data(config.clone()).await {
             Err(e) => {
                 tracing::error!("{e}");
                 Vec::new()

@@ -3,15 +3,11 @@
 use std::sync::Arc;
 
 use jiff::{SignedDuration, Span, SpanRound, Timestamp, Unit};
-use maud::{Markup, Render, html};
+use maud::{Markup, html};
 use octocrab::{Octocrab, models::Author};
 use url::Url;
 
-use crate::{
-    AppState,
-    api::bors::RollupSetting,
-    pages::queue::{field, render_author},
-};
+use crate::{AppState, api::bors::RollupSetting};
 
 #[derive(Clone, Debug)]
 pub struct LoginContext {
@@ -70,14 +66,14 @@ pub enum SharedStatus {
 }
 
 impl SharedStatus {
-    pub fn sort(&self) -> PrBoxKind {
+    pub fn sort(&self) -> PrSortCategory {
         match self {
-            SharedStatus::Try => PrBoxKind::Stalled,
-            SharedStatus::Perf(..) => PrBoxKind::Stalled,
-            SharedStatus::Crater(..) => PrBoxKind::Stalled,
-            SharedStatus::Fcp(..) => PrBoxKind::Stalled,
-            SharedStatus::Blocked => PrBoxKind::Stalled,
-            SharedStatus::FcpConcerns => PrBoxKind::Stalled,
+            SharedStatus::Try => PrSortCategory::Stalled,
+            SharedStatus::Perf(..) => PrSortCategory::Stalled,
+            SharedStatus::Crater(..) => PrSortCategory::Stalled,
+            SharedStatus::Fcp(..) => PrSortCategory::Stalled,
+            SharedStatus::Blocked => PrSortCategory::Stalled,
+            SharedStatus::FcpConcerns => PrSortCategory::Stalled,
         }
     }
 
@@ -195,19 +191,6 @@ pub enum CiStatus {
     Draft,
 }
 
-impl Render for CiStatus {
-    fn render(&self) -> Markup {
-        match self {
-            CiStatus::Conflicted => html! {"conflicted"},
-            CiStatus::Good => html! {"passing"},
-            CiStatus::Running => html! {"in progress"},
-            CiStatus::Bad => html! {"failing"},
-            CiStatus::Unknown => html! {"unknown"},
-            CiStatus::Draft => html! {"draft"},
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct Pr {
     pub repo: Repo,
@@ -232,160 +215,12 @@ pub struct Pr {
     pub created: Timestamp,
 }
 
-impl Pr {
-    pub fn sort(&self) -> PrBoxKind {
-        if self.draft {
-            return PrBoxKind::Draft;
-        }
-
-        match &self.status {
-            PrStatus::Review(pr_review) => match &pr_review.status {
-                PrReviewStatus::Author => PrBoxKind::Stalled,
-                PrReviewStatus::Review => PrBoxKind::TodoReview,
-                PrReviewStatus::Shared(shared_status) => shared_status.sort(),
-            },
-            PrStatus::Own(own_pr) => match &own_pr.status {
-                OwnPrStatus::WaitingForReview => PrBoxKind::Stalled,
-                OwnPrStatus::Pending => PrBoxKind::WorkReady,
-                OwnPrStatus::Shared(shared_status) => shared_status.sort(),
-            },
-            PrStatus::Queued(_) => PrBoxKind::Queue,
-        }
-    }
-
-    pub fn author(&self) -> Option<Markup> {
-        if let PrStatus::Review(r) = &self.status {
-            Some(field("author", render_author(&r.author)))
-        } else {
-            None
-        }
-    }
-
-    pub fn reviewers(&self) -> Option<Markup> {
-        if let PrStatus::Own(r) = &self.status {
-            Some(html! {
-                @for r in &r.reviewers {
-                    (field("reviewer", render_author(r)))
-                }
-            })
-        } else if let PrStatus::Queued(r) = &self.status {
-            Some(html! {
-                (field("author", render_author(&r.author)))
-                @for r in &r.approvers {
-                    (field("approver", render_author(r)))
-                }
-            })
-        } else {
-            None
-        }
-    }
-
-    pub fn rollup(&self) -> Option<Markup> {
-        if let PrStatus::Queued(r) = &self.status {
-            match r.rollup_status {
-                RollupStatus::InQueue { position: 1 } => Some(html! {span {"1st in queue"}}),
-                RollupStatus::InQueue { position: 2 } => Some(html! {span {"2nd in queue"}}),
-                RollupStatus::InQueue { position: 3 } => Some(html! {span {"3rd in queue"}}),
-                RollupStatus::InQueue { position } => Some(html! {span {(position) "th in queue"}}),
-                RollupStatus::Running => Some(html! {span {"running"}}),
-                RollupStatus::InRollup { nth_rollup: 0 } => Some(html! {"in next rollup"}),
-                RollupStatus::InRollup { nth_rollup: 1 } => Some(html! {"in 2nd rollup"}),
-                RollupStatus::InRollup { nth_rollup: 2 } => Some(html! {"in 3rd rollup"}),
-                RollupStatus::InRollup { nth_rollup } => Some(html! {"in "(nth_rollup)"th rollup"}),
-                RollupStatus::InRunningRollup => Some(html! {span {"in running rollup"}}),
-                RollupStatus::InNextRollup { position: 1 } => {
-                    Some(html! {span {"rollup 1st in queue"}})
-                }
-                RollupStatus::InNextRollup { position: 2 } => {
-                    Some(html! {span {"rollup 2nd in queue"}})
-                }
-                RollupStatus::InNextRollup { position: 3 } => {
-                    Some(html! {span {"rollup 3rd in queue"}})
-                }
-                RollupStatus::InNextRollup { position } => {
-                    Some(html! {span {"rollup " (position)"th in queue"}})
-                }
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn badge(&self) -> Vec<Markup> {
-        let mut res = Vec::new();
-
-        match &self.status {
-            PrStatus::Review(pr_review) => match &pr_review.status {
-                PrReviewStatus::Author => res.push(html! {
-                    span{"waiting for author"}
-                }),
-                PrReviewStatus::Review => {}
-                PrReviewStatus::Shared(shared_status) => res.extend(shared_status.stalled()),
-            },
-            PrStatus::Own(own_pr) => match &own_pr.status {
-                OwnPrStatus::WaitingForReview => res.push(html! {
-                    span {"waiting for review"}
-                }),
-                OwnPrStatus::Pending => {}
-                OwnPrStatus::Shared(shared_status) => res.extend(shared_status.stalled()),
-            },
-            PrStatus::Queued(QueuedStatus {
-                rollup_setting: RollupSetting::Iffy,
-                ..
-            }) => res.push(html! { span{"rollup=iffy"} }),
-            PrStatus::Queued(QueuedStatus {
-                rollup_setting: RollupSetting::Never,
-                ..
-            }) => res.push(html! { span{"rollup=never"} }),
-            PrStatus::Queued(..) => {}
-        }
-
-        res
-    }
-}
-
-#[derive(Default, Clone)]
-pub enum BackendStatus {
-    Idle {
-        last_refresh: Timestamp,
-    },
-    Refreshing,
-    #[default]
-    Uninitialized,
-}
-
-impl Render for BackendStatus {
-    fn render(&self) -> Markup {
-        match self {
-            BackendStatus::Idle { last_refresh } => {
-                let last_refresh = last_refresh.strftime("%H:%M (%Q)").to_string();
-                html! {span {"Idle (last refresh: " (last_refresh) ")"}}
-            }
-            BackendStatus::Refreshing => html! {span {"refreshing..."}},
-            BackendStatus::Uninitialized => html! {span {"uninitialized"}},
-        }
-    }
-}
-
 #[derive(PartialEq)]
-pub enum PrBoxKind {
+pub enum PrSortCategory {
     Draft,
     Stalled,
     WorkReady,
     TodoReview,
     Queue,
     Other,
-}
-
-impl Render for PrBoxKind {
-    fn render(&self) -> Markup {
-        match self {
-            PrBoxKind::Draft => html! {span {"Draft"}},
-            PrBoxKind::Stalled => html! {span {"Waiting"}},
-            PrBoxKind::TodoReview => html! {span {"Waiting for my review"}},
-            PrBoxKind::Other => html! {span {"Other"}},
-            PrBoxKind::Queue => html! {span {"In the bors queue"}},
-            PrBoxKind::WorkReady => html! {span {"Ready to work on"}},
-        }
-    }
 }
