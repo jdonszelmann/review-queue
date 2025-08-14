@@ -362,7 +362,9 @@ async fn process_pr(
     };
 
     let status = if let Some((bors, rollups)) = &bors
-        && (bors.status == BorsStatus::Approved || bors.status == BorsStatus::Pending)
+        && (bors.status == BorsStatus::Approved
+            || bors.status == BorsStatus::Pending
+            || issue.labels.iter().any(|i| i.name == "S-waiting-on-bors"))
     {
         let mut rollup_status = RollupStatus::InQueue {
             position: bors.position_in_queue,

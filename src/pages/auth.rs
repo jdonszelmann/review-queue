@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    db::MacroRoot,
+    db::{MacroRoot, User},
     model::{LoginContext, Repo},
-    queue_page::page_template,
+    pages::queue::page_template,
 };
 use axum::{
     RequestPartsExt,
@@ -23,6 +23,7 @@ use oauth2::{
 use octocrab::Octocrab;
 use reqwest::{Client, StatusCode};
 use rust_query::{FromExpr, TableRow, optional};
+use tokio::task::spawn_blocking;
 use url::Url;
 
 use crate::{AppState, db::OauthState};
@@ -200,6 +201,28 @@ impl FromRequestParts<Arc<AppState>> for ExtractLoginContext {
                 tracing::error!("{e}");
                 LoginError.into_response()
             })?;
+
+        spawn_blocking({
+            let user = user.clone();
+            let state = state.clone();
+            move || {
+                state.db.transaction_mut_ok(|txn| {
+                    let db_user =
+                        txn.query_one(Option::<User>::from_expr(User::unique(&user.login)));
+
+                    if db_user.is_none() {
+                        txn.insert(User {
+                            username: user.login.clone(),
+                            refresh_rate_seconds: 2 * 60,
+                            sequence_number: 0,
+                        })
+                        .expect("not in");
+                    }
+                });
+            }
+        })
+        .await
+        .unwrap();
 
         Ok(Self(Some(Arc::new(LoginContext {
             octocrab,

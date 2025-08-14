@@ -3,7 +3,7 @@ use axum::{
     routing::{any, get},
 };
 use color_eyre::eyre::Context;
-use rust_query::Database;
+use rust_query::{Database, FromExpr, Update, optional};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -11,19 +11,21 @@ use std::{env, sync::Arc, time::Duration};
 use tokio::sync::{OnceCell, RwLock};
 use tower_http::services::ServeDir;
 
-use crate::model::{LoginContext, Pr};
+use crate::db::{Issue, MacroRoot};
 use crate::{api::crater::get_crater_queue, db::Schema};
 use crate::{
     api::{Cache, github::get_prs},
     model::CraterStatus,
 };
+use crate::{
+    db::User,
+    model::{LoginContext, Pr},
+};
 
 mod api;
-mod auth;
 mod db;
-mod home_page;
 mod model;
-mod queue_page;
+mod pages;
 
 const REFRESH_RATE: Duration = Duration::from_secs(60);
 
@@ -60,6 +62,43 @@ async fn get_state_instantly(config: Arc<LoginContext>) -> Vec<Pr> {
         .unwrap_or_default()
 }
 
+async fn update_prs_database(prs: &[Pr], config: Arc<LoginContext>) {
+    config.state.db.transaction_mut_ok(|txn| {
+        let (user, user_row): (User!(username, sequence_number), _) = txn
+            .query_one(optional(|row| {
+                let user = row.and(User::unique(&config.username));
+                row.then((FromExpr::from_expr(&user), &user))
+            }))
+            .expect("logged in");
+
+        txn.update_ok(
+            user_row,
+            User {
+                sequence_number: Update::set(user.sequence_number + 1),
+                ..Default::default()
+            },
+        );
+
+        for pr in prs {
+            let res = txn.insert(db::Issue {
+                number: pr.number as i64,
+                user: user_row,
+                last_seen_sequence_number: user.sequence_number,
+            });
+
+            if let Err(existing_row) = res {
+                txn.update_ok(
+                    existing_row,
+                    Issue {
+                        last_seen_sequence_number: Update::set(user.sequence_number),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+    });
+}
+
 async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<Pr> {
     tracing::info!("refreshing for user {}", config.username);
 
@@ -79,7 +118,10 @@ async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<Pr> {
                 tracing::error!("{e}");
                 Vec::new()
             }
-            Ok(prs) => prs,
+            Ok(prs) => {
+                update_prs_database(&prs, config.clone()).await;
+                prs
+            }
         })
         .await
         .clone()
@@ -133,12 +175,16 @@ async fn main() -> color_eyre::Result<()> {
 
     // build our application with a single route
     let app = Router::new()
-        .route("/", get(home_page::home_page))
-        .route("/auth/github/login", get(auth::login))
-        .route("/auth/github/callback", get(auth::callback))
-        .route("/queue", get(queue_page::queue_page))
-        .route("/queue/ws", any(queue_page::queue_ws))
-        .route("/logout", get(auth::logout))
+        // auth routes
+        .route("/auth/github/login", get(pages::auth::login))
+        .route("/auth/github/callback", get(pages::auth::callback))
+        .route("/logout", get(pages::auth::logout))
+        // home page
+        .route("/", get(pages::home::home_page))
+        // queue page
+        .route("/queue", get(pages::queue::queue_page))
+        .route("/queue/ws", any(pages::queue::queue_ws))
+        // rest
         .with_state(Arc::new(AppState::new(db, config.clone())))
         .nest_service("/assets/", ServeDir::new(config.assets_dir.clone()));
 

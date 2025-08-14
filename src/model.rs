@@ -10,7 +10,7 @@ use url::Url;
 use crate::{
     AppState,
     api::bors::RollupSetting,
-    queue_page::{field, render_author},
+    pages::queue::{field, render_author},
 };
 
 #[derive(Clone, Debug)]

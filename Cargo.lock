@@ -2041,7 +2041,7 @@ dependencies = [
 [[package]]
 name = "rust-query"
 version = "0.4.4"
-source = "git+https://github.com/LHolten/rust-query#7fd7b2bc07570936c8da180605e0f4600745e421"
+source = "git+https://github.com/LHolten/rust-query#afe4849f9ddc9e7509942e3d57868ddff8bc27d9"
 dependencies = [
  "k12",
  "pretty_assertions",
@@ -2058,7 +2058,7 @@ dependencies = [
 [[package]]
 name = "rust-query-macros"
 version = "0.4.4"
-source = "git+https://github.com/LHolten/rust-query#7fd7b2bc07570936c8da180605e0f4600745e421"
+source = "git+https://github.com/LHolten/rust-query#afe4849f9ddc9e7509942e3d57868ddff8bc27d9"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",

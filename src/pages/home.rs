@@ -6,7 +6,7 @@ use axum::{
 };
 use maud::html;
 
-use crate::{AppState, auth::ExtractLoginContext, queue_page::page_template};
+use crate::{AppState, pages::auth::ExtractLoginContext, pages::queue::page_template};
 
 pub async fn home_page(
     State(..): State<Arc<AppState>>,

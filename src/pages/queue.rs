@@ -11,10 +11,9 @@ use octocrab::models::Author;
 use tokio::{select, spawn, time::sleep};
 
 use crate::{
-    REFRESH_RATE,
-    auth::ExtractLoginContext,
-    get_and_update_state, get_state_instantly,
+    REFRESH_RATE, get_and_update_state, get_state_instantly,
     model::{CiStatus, Pr, PrBoxKind},
+    pages::auth::ExtractLoginContext,
 };
 
 const CHECKMARK: PreEscaped<&str> = PreEscaped(

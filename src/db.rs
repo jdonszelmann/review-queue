@@ -8,19 +8,23 @@ use rust_query::{
 #[schema(Schema)]
 #[version(0..=0)]
 pub mod vN {
-    pub struct Repo {
-        pub owner: String,
-        pub name: String,
-        pub bors_url: String,
-    }
-
-    pub struct RepoUser {
-        pub repo: Repo,
-        pub user: User,
-    }
-
     pub struct User {
+        #[unique]
         pub username: String,
+
+        /// put in issues to know which ones are old
+        pub sequence_number: i64,
+
+        pub refresh_rate_seconds: i64,
+    }
+
+    /// To keep a history of closed issues
+    pub struct Issue {
+        #[unique]
+        pub number: i64,
+        pub user: User,
+
+        pub last_seen_sequence_number: i64,
     }
 
     pub struct OauthState {
