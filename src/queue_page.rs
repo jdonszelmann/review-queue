@@ -223,7 +223,7 @@ pub async fn render_pr(pr: &Pr) -> Markup {
                 (pr.title)
             }}
 
-            a class="pr-link" href=(pr.link) {
+            a class="pr-link" target="_blank" rel="noopener noreferrer" href=(pr.link) {
                 (pr.repo.owner) "/" (pr.repo.name) "#" (pr.number)
             }
 
