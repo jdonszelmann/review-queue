@@ -3,7 +3,7 @@ use axum::{
     routing::{any, get},
 };
 use color_eyre::eyre::Context;
-use rust_query::{Database, FromExpr, Update, optional};
+use rust_query::{Database, IntoExpr, Update};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::{env, sync::Arc, time::Duration};
 use tokio::sync::{OnceCell, RwLock};
 use tower_http::services::ServeDir;
 
-use crate::db::{Issue, MacroRoot};
+use crate::db::Issue;
 use crate::{api::crater::get_crater_queue, db::Schema};
 use crate::{
     api::{Cache, github::scrape_pr_data},
@@ -64,33 +64,32 @@ async fn get_state_instantly(config: Arc<LoginContext>) -> Vec<Pr> {
 
 async fn update_prs_database(prs: &[Pr], config: Arc<LoginContext>) {
     config.state.db.transaction_mut_ok(|txn| {
-        let (user, user_row): (User!(username, sequence_number), _) = txn
-            .query_one(optional(|row| {
-                let user = row.and(User::unique(&config.username));
-                row.then((FromExpr::from_expr(&user), &user))
-            }))
+        let user_row = txn
+            .query_one(User::unique(&config.username))
             .expect("logged in");
 
         txn.update_ok(
             user_row,
             User {
-                sequence_number: Update::set(user.sequence_number + 1),
+                sequence_number: Update::add(1),
                 ..Default::default()
             },
         );
 
+        // Make an `Expr` from the `TableRow` so that we can get an `Expr` for the `sequence_number`.
+        let user = user_row.into_expr();
         for pr in prs {
             let res = txn.insert(db::Issue {
                 number: pr.number as i64,
                 user: user_row,
-                last_seen_sequence_number: user.sequence_number,
+                last_seen_sequence_number: &user.sequence_number,
             });
 
             if let Err(existing_row) = res {
                 txn.update_ok(
                     existing_row,
                     Issue {
-                        last_seen_sequence_number: Update::set(user.sequence_number),
+                        last_seen_sequence_number: Update::set(&user.sequence_number),
                         ..Default::default()
                     },
                 );

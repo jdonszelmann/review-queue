@@ -22,7 +22,7 @@ use oauth2::{
 };
 use octocrab::Octocrab;
 use reqwest::{Client, StatusCode};
-use rust_query::{FromExpr, TableRow, optional};
+use rust_query::FromExpr;
 use tokio::task::spawn_blocking;
 use url::Url;
 
@@ -93,7 +93,7 @@ pub async fn login(
             pkcs: pkce_code_verifier.secret(),
             return_url,
         })
-        .unwrap();
+        .expect("csrf is expected to be unique every time");
     });
 
     Ok(Redirect::to(authorize_url.as_str()))
@@ -115,10 +115,7 @@ pub async fn callback(
 
     let Some(res) = state.db.transaction_mut_ok(|txn| {
         // get the row (id)
-        let info: Option<TableRow<OauthState>> = txn.query_one(optional(|row| {
-            let oauth = row.and(OauthState::unique(state_param.secret()));
-            row.then(FromExpr::from_expr(oauth))
-        }));
+        let info = txn.query_one(OauthState::unique(state_param.secret()));
 
         if let Some(info) = info {
             // query the pkcs and return url
@@ -207,17 +204,11 @@ impl FromRequestParts<Arc<AppState>> for ExtractLoginContext {
             let state = state.clone();
             move || {
                 state.db.transaction_mut_ok(|txn| {
-                    let db_user =
-                        txn.query_one(Option::<User>::from_expr(User::unique(&user.login)));
-
-                    if db_user.is_none() {
-                        txn.insert(User {
-                            username: user.login.clone(),
-                            refresh_rate_seconds: 2 * 60,
-                            sequence_number: 0,
-                        })
-                        .expect("not in");
-                    }
+                    txn.find_or_insert(User {
+                        username: user.login.clone(),
+                        refresh_rate_seconds: 2 * 60,
+                        sequence_number: 0,
+                    });
                 });
             }
         })
