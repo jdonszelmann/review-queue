@@ -330,7 +330,7 @@ impl<'a> PrBox for QueuedPrBox<'a> {
             group.sort_by_key(|(_, i)| *i);
             res.push((
                 html! {
-                    div class="rollup" style=(format!("grid-column: span {};", group.len())) {
+                    div class="rollup" style=(format!("--num-prs-in-rollup: {};", group.len())) {
                         h4 {a href=(pr_link) target="_blank" rel="noopener noreferrer" {"Rollup #" (pr_number)}}
                         div class="contents" {
                             @for (pr, _) in group {

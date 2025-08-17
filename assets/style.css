@@ -16,6 +16,37 @@ html {
     height: 100%;
 }
 
+@property --100vw {
+    syntax: "<length>";
+    initial-value: 0px;
+    inherits: true;
+}
+
+@property --base-width {
+    syntax: "<length>";
+    initial-value: 0px;
+    inherits: true;
+}
+
+@property --main-padding {
+    syntax: "<length>";
+    initial-value: 0px;
+    inherits: true;
+}
+
+@property --pr-gap {
+    syntax: "<length>";
+    initial-value: 0px;
+    inherits: true;
+}
+
+:root {
+    --100vw: 100vw;
+    --base-width: 20em;
+    --main-padding: 1em;
+    --pr-gap: 1em;
+}
+
 a {
     text-decoration: none;
     color: #bac0c9;
@@ -28,7 +59,7 @@ nav {
     height: 3em;
     align-items: center;
 
-    padding: 0em 1em;
+    padding: 0em var(--main-padding);
 
     backend-status {
         display: flex;
@@ -52,13 +83,47 @@ main {
     display: flex;
     flex-direction: column;
 
-    padding: 1em;
+    padding: var(--main-padding);
 }
 
 .prs {
-    display: grid;
-    gap: 1em;
-    grid-template-columns: repeat(auto-fill, minmax(20em, 1fr));
+    gap: var(--pr-gap);
+
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+
+    --actual-gap: calc(var(--pr-gap));
+    --actual-padding: calc(var(--main-padding));
+    --element-width: calc(var(--base-width) + 2px);
+
+    --total-padding: calc(var(--actual-padding) * 2);
+    --available-width: calc(
+        var(--100vw) - var(--total-padding) + var(--actual-gap)
+    );
+    --number-on-screen: calc(
+        tan(
+            atan2(
+                var(--available-width),
+                var(--element-width) + var(--actual-gap)
+            )
+        )
+    );
+
+    --rounded-number-on-screen: calc(round(down, var(--number-on-screen)));
+    --base-width-on-screen: calc(
+        (var(--rounded-number-on-screen) * (var(--element-width))) +
+            ((var(--rounded-number-on-screen) - 1) * var(--actual-gap))
+    );
+
+    --empty-space: calc(
+        (var(--100vw) - var(--total-padding)) - var(--base-width-on-screen)
+    );
+    --empty-space-per-element: calc(
+        var(--empty-space) / var(--rounded-number-on-screen)
+    );
+
+    --pr-width: calc(var(--element-width) + var(--empty-space-per-element));
 }
 
 .rollup {
@@ -73,6 +138,20 @@ main {
     border: 0.05rem solid;
     border-radius: 1em;
     padding: 0.5em;
+    box-sizing: border-box;
+
+    --width-in-elems: calc(
+        min(var(--num-prs-in-rollup), var(--rounded-number-on-screen))
+    );
+    --rollup-width: calc(
+        (var(--width-in-elems) * var(--pr-width)) +
+            ((var(--width-in-elems) - 1) * var(--actual-gap))
+    );
+    width: var(--rollup-width);
+
+    .pr {
+        width: unset;
+    }
 
     h4 {
         margin: 0em;
@@ -82,25 +161,21 @@ main {
 
     .contents {
         display: grid;
-        gap: 1em;
-        grid-template-columns: repeat(auto-fill, minmax(18em, 1fr));
-
+        grid-template-columns: repeat(var(--width-in-elems), minmax(17em, 1fr));
         gap: 1em;
     }
 }
 
 .pr {
+    width: var(--pr-width);
+
     background-color: #212830;
     border-radius: 0.5em;
-    border: 0.05rem solid;
+    border: 1px solid;
 
+    box-sizing: border-box;
     padding: 0.25em 1em;
     padding-bottom: 1em;
-
-    h2 {
-        font-size: medium;
-        margin-bottom: 0;
-    }
 
     min-height: 10em;
 
@@ -109,6 +184,11 @@ main {
     gap: 0;
 
     position: relative;
+
+    h2 {
+        font-size: medium;
+        margin-bottom: 0;
+    }
 
     .pr-link {
         margin-top: 0;
