@@ -78,13 +78,22 @@ async fn sort_queued(
             {
                 if rollup.pr_numbers.contains(&issue.number) {
                     rollup_status = if rollup.running {
-                        QueueStatus::InRunningRollup
+                        QueueStatus::InRunningRollup {
+                            pr_link: rollup.pr_link.clone(),
+                            pr_number: rollup.pr_number,
+                        }
                     } else if idx == 0 {
                         QueueStatus::InNextRollup {
                             position: rollup.position_in_queue,
+                            pr_link: rollup.pr_link.clone(),
+                            pr_number: rollup.pr_number,
                         }
                     } else {
-                        QueueStatus::InRollup { nth_rollup: idx }
+                        QueueStatus::InRollup {
+                            nth_rollup: idx,
+                            pr_link: rollup.pr_link.clone(),
+                            pr_number: rollup.pr_number,
+                        }
                     };
 
                     break;

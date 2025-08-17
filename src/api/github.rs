@@ -1,6 +1,5 @@
 use std::{future::ready, sync::Arc, time::Duration};
 
-use color_eyre::eyre::Context;
 use futures::{SinkExt, StreamExt, stream};
 use octocrab::{
     Octocrab,

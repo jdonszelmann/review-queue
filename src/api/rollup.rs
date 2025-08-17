@@ -1,5 +1,6 @@
 use color_eyre::eyre::Context;
 use octocrab::Octocrab;
+use url::Url;
 
 use crate::{
     api::{bors::BorsQueue, github::get_pr},
@@ -10,6 +11,7 @@ use crate::{
 #[allow(unused)]
 pub struct Rollup {
     pub pr_number: u64,
+    pub pr_link: Url,
     pub running: bool,
     pub position_in_queue: usize,
     pub pr_numbers: Vec<u64>,
@@ -41,6 +43,11 @@ pub async fn find_rollups(
             continue;
         };
 
+        let Some(html_url) = gh_pr.html_url else {
+            tracing::error!("no url");
+            continue;
+        };
+
         let mut pr_numbers = Vec::new();
 
         for i in body.lines() {
@@ -58,6 +65,7 @@ pub async fn find_rollups(
             running: pr.position_in_queue == 1,
             position_in_queue: pr.position_in_queue,
             pr_numbers,
+            pr_link: html_url,
         });
     }
 

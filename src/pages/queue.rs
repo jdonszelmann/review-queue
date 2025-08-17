@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use futures_util::{sink::SinkExt, stream::StreamExt};
-use jiff::{Span, SpanRound, Timestamp, Unit, civil::Time};
+use jiff::{Span, SpanRound, Timestamp, Unit};
 use maud::{DOCTYPE, Markup, PreEscaped, Render, html};
 use tokio::{select, spawn, time::sleep};
 
@@ -18,7 +18,7 @@ use crate::{
         Author, CiStatus, CraterStatus, Pr, PrStatus, QueueStatus, QueuedInfo, RollupSetting,
         WaitingReason,
     },
-    pages::{auth::ExtractLoginContext, queue},
+    pages::auth::ExtractLoginContext,
 };
 
 const CHECKMARK: PreEscaped<&str> = PreEscaped(
@@ -270,7 +270,7 @@ impl<'a> PrBox for QueuedPrBox<'a> {
     }
 
     fn render(&self, res: &mut Vec<(Markup, Self::SortKey)>) {
-        let mut rollups = BTreeMap::<RollupPosition, Vec<(Markup, _)>>::new();
+        let mut rollups = BTreeMap::<RollupPosition, (Vec<(Markup, _)>, _, _)>::new();
 
         for i in self.0 {
             let PrStatus::Queued(QueuedInfo {
@@ -300,27 +300,38 @@ impl<'a> PrBox for QueuedPrBox<'a> {
                     res.push((skeleton, QueuedSortKey::Normal(*position)))
                 }
                 QueueStatus::Running => res.push((skeleton, QueuedSortKey::Normal(0))),
-                QueueStatus::InNextRollup { position } => rollups
+                QueueStatus::InNextRollup {
+                    position,
+                    pr_link,
+                    pr_number,
+                } => rollups
                     .entry(RollupPosition::Next(*position))
-                    .or_default()
+                    .or_insert((Vec::new(), pr_link.clone(), *pr_number))
+                    .0
                     .push((skeleton, &i.created)),
-                QueueStatus::InRollup { nth_rollup } => rollups
+                QueueStatus::InRollup {
+                    nth_rollup,
+                    pr_link,
+                    pr_number,
+                } => rollups
                     .entry(RollupPosition::Nth(*nth_rollup))
-                    .or_default()
+                    .or_insert((Vec::new(), pr_link.clone(), *pr_number))
+                    .0
                     .push((skeleton, &i.created)),
-                QueueStatus::InRunningRollup => rollups
+                QueueStatus::InRunningRollup { pr_link, pr_number } => rollups
                     .entry(RollupPosition::Next(0))
-                    .or_default()
+                    .or_insert((Vec::new(), pr_link.clone(), *pr_number))
+                    .0
                     .push((skeleton, &i.created)),
             }
         }
 
-        for (pos, mut group) in rollups {
+        for (pos, (mut group, pr_link, pr_number)) in rollups {
             group.sort_by_key(|(_, i)| *i);
             res.push((
                 html! {
                     div class="rollup" style=(format!("grid-column: span {};", group.len())) {
-                        h4 {"Rollup"}
+                        h4 {a href=(pr_link) target="_blank" rel="noopener noreferrer" {"Rollup #" (pr_number)}}
                         div class="contents" {
                             @for (pr, _) in group {
                                 (pr)
@@ -405,12 +416,12 @@ impl Render for QueueStatus {
         match self {
             QueueStatus::InQueue { position } => html! {span {(Ordinal(*position)) " in queue"}},
             QueueStatus::Running => html! {span {"running"}},
-            QueueStatus::InRollup { nth_rollup: 0 } => html! {"in next rollup"},
-            QueueStatus::InRollup { nth_rollup } => {
+            QueueStatus::InRollup { nth_rollup: 0, .. } => html! {"in next rollup"},
+            QueueStatus::InRollup { nth_rollup, .. } => {
                 html! {"in "(Ordinal(nth_rollup - 1))" rollup"}
             }
-            QueueStatus::InRunningRollup => html! {span {"in running rollup"}},
-            QueueStatus::InNextRollup { position } => {
+            QueueStatus::InRunningRollup { .. } => html! {span {"in running rollup"}},
+            QueueStatus::InNextRollup { position, .. } => {
                 html! {span {"rollup " (Ordinal(*position))" in queue"}}
             }
             QueueStatus::Unknown => html! {},

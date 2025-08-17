@@ -53,11 +53,24 @@ pub struct Author {
 #[derive(Clone, Debug)]
 pub enum QueueStatus {
     Unknown,
-    InQueue { position: usize },
+    InQueue {
+        position: usize,
+    },
     Running,
-    InNextRollup { position: usize },
-    InRollup { nth_rollup: usize },
-    InRunningRollup,
+    InNextRollup {
+        position: usize,
+        pr_link: Url,
+        pr_number: u64,
+    },
+    InRollup {
+        nth_rollup: usize,
+        pr_link: Url,
+        pr_number: u64,
+    },
+    InRunningRollup {
+        pr_link: Url,
+        pr_number: u64,
+    },
 }
 
 #[derive(Clone, Debug)]
