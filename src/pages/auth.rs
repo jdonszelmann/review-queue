@@ -24,6 +24,7 @@ use oauth2::{
 use octocrab::Octocrab;
 use reqwest::{Client, StatusCode};
 use rust_query::FromExpr;
+use time::OffsetDateTime;
 use tokio::task::spawn_blocking;
 use url::Url;
 
@@ -154,7 +155,11 @@ pub async fn callback(
     cookie.set_same_site(SameSite::Strict);
     cookie.set_path("/");
     cookie.set_http_only(true);
-    cookie.set_expires(Expiration::Session);
+
+    let now = OffsetDateTime::now_utc();
+    let expiration = now.checked_add(time::Duration::WEEK * 10).unwrap();
+    cookie.set_expires(Expiration::from(expiration));
+
     cookie.set_secure(true);
 
     Ok((

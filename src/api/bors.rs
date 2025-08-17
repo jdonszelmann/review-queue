@@ -40,11 +40,7 @@ impl BorsQueue {
     }
 }
 
-pub async fn get_bors_info(
-    // config: Arc<LoginContext>,
-    // repo: Repo,
-    url: Url,
-) -> color_eyre::Result<BorsQueue> {
+pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
     // tracing::info!("reading bors page at {url}");
 
     // let mut pr_numbers = Vec::new();
@@ -133,13 +129,6 @@ pub async fn get_bors_info(
             });
         }
     }
-
-    // let mut rollups = Vec::new();
-    // for (number, position_in_queue) in pr_numbers {
-    //     rollups.extend(
-    //         process_rollup_pr(config.clone(), repo.clone(), number, position_in_queue).await?,
-    //     );
-    // }
 
     Ok(BorsQueue { items: prs })
 }
