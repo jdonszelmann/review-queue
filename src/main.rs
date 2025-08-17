@@ -4,7 +4,8 @@ use axum::{
 };
 use color_eyre::eyre::Context;
 use futures::StreamExt;
-use rust_query::{Database, Update};
+use octocrab::Octocrab;
+use rust_query::{Database, IntoExpr, Update};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -12,18 +13,23 @@ use std::{env, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, OnceCell, RwLock};
 use tower_http::services::ServeDir;
 
-use crate::{api::rfcbot::FcpInfoAll, db::Issue, model::Repo};
 use crate::{
     api::{
         Cache,
         bors::{BorsQueue, get_bors_info},
         github::scrape_github_for_user,
+        rollup::find_rollups,
     },
     model::{CraterStatus, Pr, RepoInfo},
 };
 use crate::{
     api::{crater::get_crater_queue, rfcbot::get_fcp_info},
     db::Schema,
+};
+use crate::{
+    api::{rfcbot::FcpInfoAll, rollup::RollupQueue},
+    db::Issue,
+    model::Repo,
 };
 use crate::{db::User, login_cx::LoginContext};
 
@@ -56,6 +62,8 @@ struct AppState {
     config: Config,
 
     bors_info: Mutex<HashMap<Repo, Cache<'static, BorsQueue>>>,
+    rollup_info: Mutex<HashMap<Repo, Cache<'static, RollupQueue, Octocrab>>>,
+
     crater_info: Cache<'static, HashMap<u64, CraterStatus>>,
     fcp_info: Cache<'static, FcpInfoAll>,
 
@@ -172,6 +180,7 @@ impl AppState {
                 Duration::from_secs(30),
             ),
             bors_info: Mutex::new(HashMap::new()),
+            rollup_info: Mutex::new(HashMap::new()),
         }
     }
 
@@ -210,6 +219,46 @@ impl AppState {
                 )
             })
             .get()
+            .await
+    }
+
+    pub async fn rollup_info(
+        self: Arc<Self>,
+        repo: RepoInfo,
+        octocrab: Octocrab,
+    ) -> Arc<RollupQueue> {
+        let this = self.clone();
+
+        self.rollup_info
+            .lock()
+            .await
+            .entry(repo.repo.clone())
+            .or_insert_with(move || {
+                let repo = repo.clone();
+                let this = this.clone();
+                Cache::new_with_param(
+                    move |octocrab: Octocrab| {
+                        let repo = repo.clone();
+                        let octocrab = octocrab.clone();
+                        let this = this.clone();
+                        async move {
+                            tracing::info!("reloading rollup info for {}", repo.repo);
+
+                            let bors_queue = this.bors_info(repo.clone()).await;
+
+                            match find_rollups(octocrab, repo.repo, &*bors_queue).await {
+                                Ok(i) => i,
+                                Err(e) => {
+                                    tracing::error!("bors queue error: {e}");
+                                    Default::default()
+                                }
+                            }
+                        }
+                    },
+                    Duration::from_secs(60),
+                )
+            })
+            .get_with_param(octocrab)
             .await
     }
 }

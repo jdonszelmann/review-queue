@@ -40,15 +40,6 @@ impl BorsQueue {
     }
 }
 
-#[derive(Debug, Clone)]
-#[allow(unused)]
-pub struct Rollup {
-    pub pr_number: u64,
-    pub running: bool,
-    pub position_in_queue: usize,
-    pub pr_numbers: Vec<u64>,
-}
-
 pub async fn get_bors_info(
     // config: Arc<LoginContext>,
     // repo: Repo,
@@ -152,36 +143,3 @@ pub async fn get_bors_info(
 
     Ok(BorsQueue { items: prs })
 }
-
-// pub async fn process_rollup_pr(
-//     config: Arc<LoginContext>,
-//     repo: Repo,
-//     number: u64,
-//     position_in_queue: usize,
-// ) -> color_eyre::Result<Option<Rollup>> {
-//     let pr = pr_info(&config, &repo, number).await?;
-
-//     let Some(body) = pr.body else {
-//         tracing::error!("no body");
-//         return Ok(None);
-//     };
-
-//     let mut pr_numbers = Vec::new();
-
-//     for i in body.lines() {
-//         if let Some(line) = i.trim().strip_prefix("- ")
-//             && let Some((_repo, rest)) = line.split_once("#")
-//             && let Some((number, _description)) = rest.split_once(" ")
-//             && let Ok(n) = number.parse()
-//         {
-//             pr_numbers.push(n);
-//         }
-//     }
-
-//     Ok(Some(Rollup {
-//         pr_numbers,
-//         running: position_in_queue == 1,
-//         position_in_queue,
-//         pr_number: number,
-//     }))
-// }

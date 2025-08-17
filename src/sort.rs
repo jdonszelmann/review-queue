@@ -53,7 +53,12 @@ async fn sort_waiting(
     }
 }
 
-fn sort_queued(issue: &Issue, bors_for_pr: Option<&BorsPr>) -> QueuedInfo {
+async fn sort_queued(
+    login_context: &LoginContext,
+    repo: &RepoInfo,
+    issue: &Issue,
+    bors_for_pr: Option<&BorsPr>,
+) -> QueuedInfo {
     let rollup_status = if let Some(bors) = bors_for_pr {
         let mut rollup_status = QueueStatus::InQueue {
             position: bors.position_in_queue,
@@ -62,21 +67,29 @@ fn sort_queued(issue: &Issue, bors_for_pr: Option<&BorsPr>) -> QueuedInfo {
         if bors.running {
             rollup_status = QueueStatus::Running;
         } else {
-            // for (idx, rollup) in all_bors_info.rollups.iter().enumerate() {
-            //     if rollup.pr_numbers.contains(&issue.number) {
-            //         rollup_status = if rollup.running {
-            //             QueueStatus::InRunningRollup
-            //         } else if idx == 0 {
-            //             QueueStatus::InNextRollup {
-            //                 position: rollup.position_in_queue,
-            //             }
-            //         } else {
-            //             QueueStatus::InRollup { nth_rollup: idx }
-            //         };
+            for (idx, rollup) in login_context
+                .state
+                .clone()
+                .rollup_info(repo.clone(), login_context.octocrab.clone())
+                .await
+                .rollups
+                .iter()
+                .enumerate()
+            {
+                if rollup.pr_numbers.contains(&issue.number) {
+                    rollup_status = if rollup.running {
+                        QueueStatus::InRunningRollup
+                    } else if idx == 0 {
+                        QueueStatus::InNextRollup {
+                            position: rollup.position_in_queue,
+                        }
+                    } else {
+                        QueueStatus::InRollup { nth_rollup: idx }
+                    };
 
-            //         break;
-            //     }
-            // }
+                    break;
+                }
+            }
         }
 
         rollup_status
@@ -96,6 +109,7 @@ fn sort_queued(issue: &Issue, bors_for_pr: Option<&BorsPr>) -> QueuedInfo {
 
 async fn sort_status(
     login_context: &LoginContext,
+    repo: &RepoInfo,
     issue: &Issue,
     pr: &PullRequest,
     bors_for_repo: &Arc<BorsQueue>,
@@ -134,7 +148,7 @@ async fn sort_status(
         || bors_for_pr
             .is_some_and(|b| matches!(b.status, BorsStatus::Approved | BorsStatus::Pending))
     {
-        PrStatus::Queued(sort_queued(issue, bors_for_pr))
+        PrStatus::Queued(sort_queued(login_context, repo, issue, bors_for_pr).await)
     } else {
         // the PR must be waiting for some reason. There are many reasons though...
         PrStatus::Waiting {
@@ -223,6 +237,7 @@ pub async fn sort(
     issue: &Issue,
     pr: &PullRequest,
 ) -> Pr {
+    tracing::info!("sorting PR {}#{} {}", repo.repo, pr.number, issue.title);
     let bors_for_repo = login_context.state.bors_info(repo.clone()).await;
 
     Pr {
@@ -233,7 +248,7 @@ pub async fn sort(
         link: issue.html_url.clone(),
         author: convert_author(&issue.user),
         reviewers: issue.assignees.iter().map(convert_author).collect(),
-        status: sort_status(login_context, issue, pr, &bors_for_repo).await,
+        status: sort_status(login_context, repo, issue, pr, &bors_for_repo).await,
         ci_status: ci_status(issue, pr, &bors_for_repo),
         created: jiff::Timestamp::from_second(issue.created_at.timestamp()).unwrap(),
     }

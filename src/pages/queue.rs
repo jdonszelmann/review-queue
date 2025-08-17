@@ -277,6 +277,7 @@ impl<'a> PrBox for QueuedPrBox<'a> {
                     vec![
                         Badge::RollupSetting(rollup_setting),
                         Badge::QueueStatus(queue_status),
+                        Badge::CiStatus(&i.ci_status),
                     ],
                 ),
                 &i.created,
@@ -330,10 +331,23 @@ fn render_pr_box(pr_box: impl PrBox) -> Markup {
 impl Render for RollupSetting {
     fn render(&self) -> Markup {
         match self {
-            RollupSetting::Never => html! {},
-            RollupSetting::Always => html! {"rollup=always"},
+            RollupSetting::Never => html! {"rollup=never"},
+            RollupSetting::Always => html! {},
             RollupSetting::Iffy => html! {"rollup=iffy"},
             RollupSetting::Unset => html! {},
+        }
+    }
+}
+
+struct Ordinal(usize);
+impl Render for Ordinal {
+    fn render(&self) -> Markup {
+        let number = self.0;
+        match number % 10 {
+            1 => html! {(format!("{number}st"))},
+            2 => html! {(format!("{number}nd"))},
+            3 => html! {(format!("{number}rd"))},
+            _ => html! {(format!("{number}th"))},
         }
     }
 }
@@ -341,21 +355,15 @@ impl Render for RollupSetting {
 impl Render for QueueStatus {
     fn render(&self) -> Markup {
         match self {
-            QueueStatus::InQueue { position: 1 } => html! {span {"1st in queue"}},
-            QueueStatus::InQueue { position: 2 } => html! {span {"2nd in queue"}},
-            QueueStatus::InQueue { position: 3 } => html! {span {"3rd in queue"}},
-            QueueStatus::InQueue { position } => html! {span {(position) "th in queue"}},
+            QueueStatus::InQueue { position } => html! {span {(Ordinal(*position)) " in queue"}},
             QueueStatus::Running => html! {span {"running"}},
             QueueStatus::InRollup { nth_rollup: 0 } => html! {"in next rollup"},
-            QueueStatus::InRollup { nth_rollup: 1 } => html! {"in 2nd rollup"},
-            QueueStatus::InRollup { nth_rollup: 2 } => html! {"in 3rd rollup"},
-            QueueStatus::InRollup { nth_rollup } => html! {"in "(nth_rollup)"th rollup"},
+            QueueStatus::InRollup { nth_rollup } => {
+                html! {"in "(Ordinal(nth_rollup - 1))" rollup"}
+            }
             QueueStatus::InRunningRollup => html! {span {"in running rollup"}},
-            QueueStatus::InNextRollup { position: 1 } => html! {span {"rollup 1st in queue"}},
-            QueueStatus::InNextRollup { position: 2 } => html! {span {"rollup 2nd in queue"}},
-            QueueStatus::InNextRollup { position: 3 } => html! {span {"rollup 3rd in queue"}},
             QueueStatus::InNextRollup { position } => {
-                html! {span {"rollup " (position)"th in queue"}}
+                html! {span {"rollup " (Ordinal(*position))" in queue"}}
             }
             QueueStatus::Unknown => html! {},
         }
@@ -371,23 +379,24 @@ pub enum Badge<'a> {
 
 impl Render for Badge<'_> {
     fn render(&self) -> Markup {
+        fn maybe_badge(m: impl Render) -> Markup {
+            let r = m.render();
+            if r.clone().into_string().is_empty() {
+                html! {}
+            } else {
+                html! {
+                    div class="status-badge" {
+                        (r)
+                    }
+                }
+            }
+        }
+
         match self {
             Badge::CiStatus(ci_status) => ci_status.render(),
-            Badge::WaitingReason(waiting_reason) => html! {
-                div class="status-badge" {
-                    (waiting_reason)
-                }
-            },
-            Badge::RollupSetting(rollup_setting) => html! {
-                div class="status-badge" {
-                    (rollup_setting)
-                }
-            },
-            Badge::QueueStatus(queue_status) => html! {
-                div class="status-badge" {
-                    (queue_status)
-                }
-            },
+            Badge::WaitingReason(waiting_reason) => maybe_badge(waiting_reason),
+            Badge::RollupSetting(rollup_setting) => maybe_badge(rollup_setting),
+            Badge::QueueStatus(queue_status) => maybe_badge(queue_status),
         }
     }
 }
@@ -527,35 +536,7 @@ fn pr_skeleton<'a>(
                         (badge)
                     }
                 }
-
-                // @if let Some(a) = pr.author() {
-                //     (a)
-                // }
-                // @if let Some(r) = pr.reviewers() {
-                //     (r)
-                // }
-                // @if let Some(r) = pr.rollup() {
-                //     (field("status", r))
-                // }
-
-                // (render_badges(pr))
-
-                // (pr.ci_state)
             }
         }
     }
 }
-
-// pub fn render_pr_box(prs: &[Pr], kind: PrSortCategory) -> Markup {
-//     let mut prs = prs
-//         .iter()
-//         .filter(|pr| pr.sort() == kind)
-//         .cloned()
-//         .collect::<Vec<_>>();
-
-//     if prs.is_empty() {
-//         return html! {};
-//     }
-
-//     prs.sort_by_cached_key(|pr| pr.created);
-// }
