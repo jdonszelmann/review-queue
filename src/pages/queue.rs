@@ -1,4 +1,4 @@
-use std::iter;
+use std::{collections::BTreeMap, iter};
 
 use axum::{
     extract::{
@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use futures_util::{sink::SinkExt, stream::StreamExt};
-use jiff::{Span, SpanRound, Timestamp, Unit};
+use jiff::{Span, SpanRound, Timestamp, Unit, civil::Time};
 use maud::{DOCTYPE, Markup, PreEscaped, Render, html};
 use tokio::{select, spawn, time::sleep};
 
@@ -18,7 +18,7 @@ use crate::{
         Author, CiStatus, CraterStatus, Pr, PrStatus, QueueStatus, QueuedInfo, RollupSetting,
         WaitingReason,
     },
-    pages::auth::ExtractLoginContext,
+    pages::{auth::ExtractLoginContext, queue},
 };
 
 const CHECKMARK: PreEscaped<&str> = PreEscaped(
@@ -247,16 +247,31 @@ impl<'a> PrBox for BlockedPrBox<'a> {
     }
 }
 
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
+pub enum RollupPosition {
+    Next(usize),
+    Nth(usize),
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
+enum QueuedSortKey<'a> {
+    Rollup(RollupPosition),
+    Normal(usize),
+    Other(&'a Timestamp),
+}
+
 struct QueuedPrBox<'a>(&'a [Pr]);
 
 impl<'a> PrBox for QueuedPrBox<'a> {
-    type SortKey = &'a Timestamp;
+    type SortKey = QueuedSortKey<'a>;
 
     fn title(&self) -> impl AsRef<str> {
         "Queued"
     }
 
-    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+    fn render(&self, res: &mut Vec<(Markup, Self::SortKey)>) {
+        let mut rollups = BTreeMap::<RollupPosition, Vec<(Markup, _)>>::new();
+
         for i in self.0 {
             let PrStatus::Queued(QueuedInfo {
                 approvers,
@@ -267,20 +282,53 @@ impl<'a> PrBox for QueuedPrBox<'a> {
                 continue;
             };
 
+            // TODO: draft should store whether it's yours or someone elses
+            // if someone elses, show author
+            let skeleton = pr_skeleton(
+                i,
+                iter::once(Field::Author(&i.author)).chain(approvers.iter().map(Field::Approver)),
+                vec![
+                    Badge::RollupSetting(rollup_setting),
+                    Badge::QueueStatus(queue_status),
+                    Badge::CiStatus(&i.ci_status),
+                ],
+            );
+
+            match queue_status {
+                QueueStatus::Unknown => res.push((skeleton, QueuedSortKey::Other(&i.created))),
+                QueueStatus::InQueue { position } => {
+                    res.push((skeleton, QueuedSortKey::Normal(*position)))
+                }
+                QueueStatus::Running => res.push((skeleton, QueuedSortKey::Normal(0))),
+                QueueStatus::InNextRollup { position } => rollups
+                    .entry(RollupPosition::Next(*position))
+                    .or_default()
+                    .push((skeleton, &i.created)),
+                QueueStatus::InRollup { nth_rollup } => rollups
+                    .entry(RollupPosition::Nth(*nth_rollup))
+                    .or_default()
+                    .push((skeleton, &i.created)),
+                QueueStatus::InRunningRollup => rollups
+                    .entry(RollupPosition::Next(0))
+                    .or_default()
+                    .push((skeleton, &i.created)),
+            }
+        }
+
+        for (pos, mut group) in rollups {
+            group.sort_by_key(|(_, i)| *i);
             res.push((
-                // TODO: draft should store whether it's yours or someone elses
-                // if someone elses, show author
-                pr_skeleton(
-                    i,
-                    iter::once(Field::Author(&i.author))
-                        .chain(approvers.iter().map(Field::Approver)),
-                    vec![
-                        Badge::RollupSetting(rollup_setting),
-                        Badge::QueueStatus(queue_status),
-                        Badge::CiStatus(&i.ci_status),
-                    ],
-                ),
-                &i.created,
+                html! {
+                    div class="rollup" style=(format!("grid-column: span {};", group.len())) {
+                        h4 {"Rollup"}
+                        div class="contents" {
+                            @for (pr, _) in group {
+                                (pr)
+                            }
+                        }
+                    }
+                },
+                QueuedSortKey::Rollup(pos),
             ));
         }
     }
