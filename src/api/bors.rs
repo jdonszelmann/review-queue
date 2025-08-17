@@ -1,13 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
-
 use color_eyre::eyre::Context;
 use scraper::{ElementRef, Html, Selector};
 use url::Url;
 
-use crate::{
-    api::github::pr_info,
-    model::{LoginContext, Repo},
-};
+use crate::model::RollupSetting;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BorsStatus {
@@ -21,16 +16,9 @@ pub enum BorsStatus {
 }
 
 #[derive(Debug, Clone)]
-pub enum RollupSetting {
-    Never,
-    Always,
-    Iffy,
-    Unset,
-}
-
-#[derive(Debug, Clone)]
 #[allow(unused)]
-pub struct BorsInfo {
+pub struct BorsPr {
+    pub pr_number: u64,
     pub approver: String,
     pub status: BorsStatus,
     pub mergeable: bool,
@@ -39,6 +27,17 @@ pub struct BorsInfo {
     pub title: String,
     pub position_in_queue: usize,
     pub running: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BorsQueue {
+    pub items: Vec<BorsPr>,
+}
+
+impl BorsQueue {
+    pub fn for_pr(&self, pr_number: u64) -> Option<&BorsPr> {
+        self.items.iter().find(|i| i.pr_number == pr_number)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -50,21 +49,15 @@ pub struct Rollup {
     pub pr_numbers: Vec<u64>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct AllBorsInfo {
-    pub prs: HashMap<u64, BorsInfo>,
-    pub rollups: Vec<Rollup>,
-}
-
-pub async fn get_bors_queue(
-    config: Arc<LoginContext>,
-    repo: Repo,
+pub async fn get_bors_info(
+    // config: Arc<LoginContext>,
+    // repo: Repo,
     url: Url,
-) -> color_eyre::Result<AllBorsInfo> {
+) -> color_eyre::Result<BorsQueue> {
     // tracing::info!("reading bors page at {url}");
 
-    let mut pr_numbers = Vec::new();
-    let mut prs = HashMap::new();
+    // let mut pr_numbers = Vec::new();
+    let mut prs = Vec::new();
 
     let response = reqwest::get(url).await?;
     let body = response.text().await.context("body")?;
@@ -132,11 +125,12 @@ pub async fn get_bors_queue(
                 continue;
             };
 
-            if title.starts_with("Rollup of") {
-                pr_numbers.push((number, position_in_queue));
-            }
+            // if title.starts_with("Rollup of") {
+            // pr_numbers.push((number, position_in_queue));
+            // }
 
-            let info = BorsInfo {
+            prs.push(BorsPr {
+                pr_number: number,
                 approver: approver.trim().to_string(),
                 status,
                 mergeable,
@@ -145,50 +139,49 @@ pub async fn get_bors_queue(
                 title: title.trim().to_string(),
                 position_in_queue: position_in_queue,
                 running: position_in_queue == 1,
-            };
-            prs.insert(number, info);
+            });
         }
     }
 
-    let mut rollups = Vec::new();
-    for (number, position_in_queue) in pr_numbers {
-        rollups.extend(
-            process_rollup_pr(config.clone(), repo.clone(), number, position_in_queue).await?,
-        );
-    }
+    // let mut rollups = Vec::new();
+    // for (number, position_in_queue) in pr_numbers {
+    //     rollups.extend(
+    //         process_rollup_pr(config.clone(), repo.clone(), number, position_in_queue).await?,
+    //     );
+    // }
 
-    Ok(AllBorsInfo { prs, rollups })
+    Ok(BorsQueue { items: prs })
 }
 
-pub async fn process_rollup_pr(
-    config: Arc<LoginContext>,
-    repo: Repo,
-    number: u64,
-    position_in_queue: usize,
-) -> color_eyre::Result<Option<Rollup>> {
-    let pr = pr_info(&config, &repo, number).await?;
+// pub async fn process_rollup_pr(
+//     config: Arc<LoginContext>,
+//     repo: Repo,
+//     number: u64,
+//     position_in_queue: usize,
+// ) -> color_eyre::Result<Option<Rollup>> {
+//     let pr = pr_info(&config, &repo, number).await?;
 
-    let Some(body) = pr.body else {
-        tracing::error!("no body");
-        return Ok(None);
-    };
+//     let Some(body) = pr.body else {
+//         tracing::error!("no body");
+//         return Ok(None);
+//     };
 
-    let mut pr_numbers = Vec::new();
+//     let mut pr_numbers = Vec::new();
 
-    for i in body.lines() {
-        if let Some(line) = i.trim().strip_prefix("- ")
-            && let Some((_repo, rest)) = line.split_once("#")
-            && let Some((number, _description)) = rest.split_once(" ")
-            && let Ok(n) = number.parse()
-        {
-            pr_numbers.push(n);
-        }
-    }
+//     for i in body.lines() {
+//         if let Some(line) = i.trim().strip_prefix("- ")
+//             && let Some((_repo, rest)) = line.split_once("#")
+//             && let Some((number, _description)) = rest.split_once(" ")
+//             && let Ok(n) = number.parse()
+//         {
+//             pr_numbers.push(n);
+//         }
+//     }
 
-    Ok(Some(Rollup {
-        pr_numbers,
-        running: position_in_queue == 1,
-        position_in_queue,
-        pr_number: number,
-    }))
-}
+//     Ok(Some(Rollup {
+//         pr_numbers,
+//         running: position_in_queue == 1,
+//         position_in_queue,
+//         pr_number: number,
+//     }))
+// }

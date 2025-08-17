@@ -1994,6 +1994,7 @@ dependencies = [
  "axum-extra",
  "color-eyre",
  "dotenvy",
+ "futures",
  "futures-util",
  "jiff",
  "maud",

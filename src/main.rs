@@ -3,32 +3,36 @@ use axum::{
     routing::{any, get},
 };
 use color_eyre::eyre::Context;
-use rust_query::{Database, IntoExpr, Update};
+use futures::StreamExt;
+use rust_query::{Database, Update};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::{env, sync::Arc, time::Duration};
-use tokio::sync::{OnceCell, RwLock};
+use tokio::sync::{Mutex, OnceCell, RwLock};
 use tower_http::services::ServeDir;
 
-use crate::{api::rfcbot::FcpInfoAll, db::Issue};
+use crate::{api::rfcbot::FcpInfoAll, db::Issue, model::Repo};
 use crate::{
-    api::{Cache, github::scrape_pr_data},
-    model::CraterStatus,
+    api::{
+        Cache,
+        bors::{BorsQueue, get_bors_info},
+        github::scrape_github_for_user,
+    },
+    model::{CraterStatus, Pr, RepoInfo},
 };
 use crate::{
     api::{crater::get_crater_queue, rfcbot::get_fcp_info},
     db::Schema,
 };
-use crate::{
-    db::User,
-    model::{LoginContext, Pr},
-};
+use crate::{db::User, login_cx::LoginContext};
 
 mod api;
 mod db;
+mod login_cx;
 mod model;
 mod pages;
+mod sort;
 
 const REFRESH_RATE: Duration = Duration::from_secs(60);
 
@@ -51,6 +55,7 @@ struct AppState {
     db: Database<Schema>,
     config: Config,
 
+    bors_info: Mutex<HashMap<Repo, Cache<'static, BorsQueue>>>,
     crater_info: Cache<'static, HashMap<u64, CraterStatus>>,
     fcp_info: Cache<'static, FcpInfoAll>,
 
@@ -116,15 +121,13 @@ async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<Pr> {
 
     user_state
         .prs
-        .get_or_init(async || match scrape_pr_data(config.clone()).await {
-            Err(e) => {
-                tracing::error!("{e}");
-                Vec::new()
-            }
-            Ok(prs) => {
-                update_prs_database(&prs, config.clone()).await;
-                prs
-            }
+        .get_or_init(async || {
+            let pr_stream = scrape_github_for_user(config.clone());
+            let prs: Vec<_> = pr_stream.collect().await;
+
+            update_prs_database(&prs, config.clone()).await;
+
+            prs
         })
         .await
         .clone()
@@ -144,7 +147,7 @@ impl AppState {
             config,
             crater_info: Cache::new(
                 async || {
-                    tracing::info!("reloading crater");
+                    tracing::info!("reloading crater info");
                     match get_crater_queue().await {
                         Ok(i) => i,
                         Err(e) => {
@@ -157,7 +160,7 @@ impl AppState {
             ),
             fcp_info: Cache::new(
                 async || {
-                    tracing::info!("reloading fcp");
+                    tracing::info!("reloading fcp info");
                     match get_fcp_info().await {
                         Ok(i) => i,
                         Err(e) => {
@@ -168,7 +171,46 @@ impl AppState {
                 },
                 Duration::from_secs(30),
             ),
+            bors_info: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub async fn bors_info(&self, repo: RepoInfo) -> Arc<BorsQueue> {
+        let RepoInfo {
+            repo,
+            bors_queue_url: Some(url),
+        } = repo
+        else {
+            return Arc::new(Default::default());
+        };
+
+        self.bors_info
+            .lock()
+            .await
+            .entry(repo.clone())
+            .or_insert_with(move || {
+                let repo = repo.clone();
+                let url = url.clone();
+                Cache::new(
+                    move || {
+                        let repo = repo.clone();
+                        let url = url.clone();
+                        async move {
+                            tracing::info!("reloading bors info for {repo}");
+                            match get_bors_info(url.clone()).await {
+                                Ok(i) => i,
+                                Err(e) => {
+                                    tracing::error!("bors queue error: {e}");
+                                    Default::default()
+                                }
+                            }
+                        }
+                    },
+                    Duration::from_secs(30),
+                )
+            })
+            .get()
+            .await
     }
 }
 

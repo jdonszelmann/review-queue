@@ -2,7 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     db::{MacroRoot, User},
-    model::{LoginContext, Repo},
+    login_cx::LoginContext,
+    model::{Repo, RepoInfo},
     pages::queue::page_template,
 };
 use axum::{
@@ -218,9 +219,11 @@ impl FromRequestParts<Arc<AppState>> for ExtractLoginContext {
         Ok(Self(Some(Arc::new(LoginContext {
             octocrab,
             username: user.login,
-            repos: vec![Repo {
-                owner: "rust-lang".to_string(),
-                name: "rust".to_string(),
+            repos: vec![RepoInfo {
+                repo: Repo {
+                    owner: "rust-lang".to_string(),
+                    name: "rust".to_string(),
+                },
                 bors_queue_url: Some(Url::parse("https://bors.rust-lang.org/queue/rust").unwrap()),
             }],
             state: state.clone(),

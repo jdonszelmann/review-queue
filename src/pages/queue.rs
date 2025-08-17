@@ -1,3 +1,5 @@
+use std::iter;
+
 use axum::{
     extract::{
         WebSocketUpgrade,
@@ -6,13 +8,16 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use futures_util::{sink::SinkExt, stream::StreamExt};
-use maud::{DOCTYPE, Markup, PreEscaped, html};
-use octocrab::models::Author;
+use jiff::{Span, SpanRound, Timestamp, Unit};
+use maud::{DOCTYPE, Markup, PreEscaped, Render, html};
 use tokio::{select, spawn, time::sleep};
 
 use crate::{
     REFRESH_RATE, get_and_update_state, get_state_instantly,
-    model::{CiStatus, Pr, PrSortCategory},
+    model::{
+        Author, CiStatus, CraterStatus, Pr, PrStatus, QueueStatus, QueuedInfo, RollupSetting,
+        WaitingReason,
+    },
     pages::auth::ExtractLoginContext,
 };
 
@@ -29,10 +34,10 @@ const PROGRESS: PreEscaped<&str> = PreEscaped(
     r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" fill="currentColor"><!--!Font Awesome Free v7.0.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2025 Fonticons, Inc.--><path d="M320 64C461.4 64 576 178.6 576 320C576 461.4 461.4 576 320 576C178.6 576 64 461.4 64 320C64 178.6 178.6 64 320 64zM296 184L296 320C296 328 300 335.5 306.7 340L402.7 404C413.7 411.4 428.6 408.4 436 397.3C443.4 386.2 440.4 371.4 429.3 364L344 307.2L344 184C344 170.7 333.3 160 320 160C306.7 160 296 170.7 296 184z"/></svg>"#,
 );
 
-pub fn field(label: impl AsRef<str>, value: Markup) -> Markup {
+pub fn field(label: impl Render, value: impl Render) -> Markup {
     html! {
         div class="field" {
-            span class="label" { (label.as_ref()) }
+            span class="label" { (label) }
             div class="value" {
                 (value)
             }
@@ -80,7 +85,7 @@ pub async fn queue_ws(
             _ = async {
                 loop {
                     let prs = spawn(get_and_update_state(config.clone())).await.unwrap();
-                    let page = queue_page_main(&prs).await;
+                    let page = queue_page_main(&prs);
                     let _ = send.send(Message::Text(Utf8Bytes::from(&page.into_string()))).await;
                     sleep(REFRESH_RATE).await;
                 }
@@ -88,19 +93,6 @@ pub async fn queue_ws(
         };
     })
     .into_response()
-}
-
-pub async fn queue_page_main(prs: &[Pr]) -> Markup {
-    html! {
-        main id="main" {
-            (render_pr_box(prs, PrSortCategory::WorkReady).await)
-            (render_pr_box(prs, PrSortCategory::TodoReview).await)
-            (render_pr_box(prs, PrSortCategory::Stalled).await)
-            (render_pr_box(prs, PrSortCategory::Queue).await)
-            (render_pr_box(prs, PrSortCategory::Draft).await)
-            (render_pr_box(prs, PrSortCategory::Other).await)
-        }
-    }
 }
 
 pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Response {
@@ -130,7 +122,7 @@ pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Res
             }
         }
 
-        (queue_page_main(&prs).await)
+        (queue_page_main(&prs))
 
         script {
             (PreEscaped(format!(r#"
@@ -149,73 +141,372 @@ pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Res
     .into_response()
 }
 
-pub async fn render_pr_box(prs: &[Pr], kind: PrSortCategory) -> Markup {
-    let mut prs = prs
-        .iter()
-        .filter(|pr| pr.sort() == kind)
-        .cloned()
-        .collect::<Vec<_>>();
+fn queue_page_main(prs: &[Pr]) -> Markup {
+    html! {
+        main id="main" {
+            (render_pr_box(ReadyPrBox(prs)))
+            (render_pr_box(ReviewPrBox(prs)))
+            (render_pr_box(BlockedPrBox(prs)))
+            (render_pr_box(QueuedPrBox(prs)))
+            (render_pr_box(DraftPrBox(prs)))
+        }
+    }
+}
 
-    if prs.is_empty() {
-        return html! {};
+trait PrBox {
+    type SortKey: Ord + Copy;
+
+    fn title(&self) -> impl AsRef<str>;
+    fn render(&self, res: &mut Vec<(Markup, Self::SortKey)>);
+}
+
+struct ReadyPrBox<'a>(&'a [Pr]);
+
+impl<'a> PrBox for ReadyPrBox<'a> {
+    type SortKey = &'a Timestamp;
+
+    fn title(&self) -> impl AsRef<str> {
+        "Ready to work on"
     }
 
-    prs.sort_by_cached_key(|pr| pr.created);
+    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+        for i in self.0 {
+            let PrStatus::Ready {} = i.status else {
+                continue;
+            };
+
+            res.push((
+                pr_skeleton(
+                    i,
+                    i.reviewers.iter().map(Field::Reviewer),
+                    vec![Badge::CiStatus(&i.ci_status)],
+                ),
+                &i.created,
+            ));
+        }
+    }
+}
+
+struct ReviewPrBox<'a>(&'a [Pr]);
+
+impl<'a> PrBox for ReviewPrBox<'a> {
+    type SortKey = &'a Timestamp;
+
+    fn title(&self) -> impl AsRef<str> {
+        "Waiting for me to review"
+    }
+
+    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+        for i in self.0 {
+            let PrStatus::Review { other_reviewers } = &i.status else {
+                continue;
+            };
+
+            res.push((
+                pr_skeleton(
+                    i,
+                    iter::once(Field::Author(&i.author))
+                        .chain(other_reviewers.iter().map(Field::OtherReviewer)),
+                    vec![Badge::CiStatus(&i.ci_status)],
+                ),
+                &i.created,
+            ));
+        }
+    }
+}
+
+struct BlockedPrBox<'a>(&'a [Pr]);
+
+impl<'a> PrBox for BlockedPrBox<'a> {
+    type SortKey = &'a Timestamp;
+
+    fn title(&self) -> impl AsRef<str> {
+        "Waiting"
+    }
+
+    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+        for i in self.0 {
+            let PrStatus::Waiting { wait_reason } = &i.status else {
+                continue;
+            };
+
+            res.push((
+                pr_skeleton(
+                    i,
+                    iter::once(Field::Author(&i.author))
+                        // TODO: only other reviewers?
+                        .chain(i.reviewers.iter().map(Field::Reviewer)),
+                    vec![
+                        Badge::WaitingReason(wait_reason),
+                        Badge::CiStatus(&i.ci_status),
+                    ],
+                ),
+                &i.created,
+            ));
+        }
+    }
+}
+
+struct QueuedPrBox<'a>(&'a [Pr]);
+
+impl<'a> PrBox for QueuedPrBox<'a> {
+    type SortKey = &'a Timestamp;
+
+    fn title(&self) -> impl AsRef<str> {
+        "Queued"
+    }
+
+    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+        for i in self.0 {
+            let PrStatus::Queued(QueuedInfo {
+                approvers,
+                rollup_setting,
+                queue_status,
+            }) = &i.status
+            else {
+                continue;
+            };
+
+            res.push((
+                // TODO: draft should store whether it's yours or someone elses
+                // if someone elses, show author
+                pr_skeleton(
+                    i,
+                    iter::once(Field::Author(&i.author))
+                        .chain(approvers.iter().map(Field::Approver)),
+                    vec![
+                        Badge::RollupSetting(rollup_setting),
+                        Badge::QueueStatus(queue_status),
+                    ],
+                ),
+                &i.created,
+            ));
+        }
+    }
+}
+
+struct DraftPrBox<'a>(&'a [Pr]);
+
+impl<'a> PrBox for DraftPrBox<'a> {
+    type SortKey = &'a Timestamp;
+
+    fn title(&self) -> impl AsRef<str> {
+        "Drafts"
+    }
+
+    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+        for i in self.0 {
+            let PrStatus::Draft {} = &i.status else {
+                continue;
+            };
+
+            res.push((
+                // TODO: draft should store whether it's yours or someone elses
+                // if someone elses, show author
+                pr_skeleton(i, iter::once(Field::Author(&i.author)), vec![]),
+                &i.created,
+            ));
+        }
+    }
+}
+
+fn render_pr_box(pr_box: impl PrBox) -> Markup {
+    let mut res = Vec::new();
+    pr_box.render(&mut res);
+    res.sort_by_key(|(_, i)| *i);
 
     html! {
         div class="prbox" {
-            h1 { (kind) }
+            h1 { (pr_box.title().as_ref()) }
             div class="prs" {
-                @for pr in prs {
-                    (render_pr(&pr).await)
+                @for (pr, _) in res {
+                    (pr)
                 }
             }
         }
     }
 }
 
-pub fn render_badges(pr: &Pr) -> Markup {
-    let mut badges = Vec::new();
+impl Render for RollupSetting {
+    fn render(&self) -> Markup {
+        match self {
+            RollupSetting::Never => html! {},
+            RollupSetting::Always => html! {"rollup=always"},
+            RollupSetting::Iffy => html! {"rollup=iffy"},
+            RollupSetting::Unset => html! {},
+        }
+    }
+}
 
-    for badge in pr.badge() {
-        badges.push(html! {
-            div class="status-badge" {
-                (badge)
+impl Render for QueueStatus {
+    fn render(&self) -> Markup {
+        match self {
+            QueueStatus::InQueue { position: 1 } => html! {span {"1st in queue"}},
+            QueueStatus::InQueue { position: 2 } => html! {span {"2nd in queue"}},
+            QueueStatus::InQueue { position: 3 } => html! {span {"3rd in queue"}},
+            QueueStatus::InQueue { position } => html! {span {(position) "th in queue"}},
+            QueueStatus::Running => html! {span {"running"}},
+            QueueStatus::InRollup { nth_rollup: 0 } => html! {"in next rollup"},
+            QueueStatus::InRollup { nth_rollup: 1 } => html! {"in 2nd rollup"},
+            QueueStatus::InRollup { nth_rollup: 2 } => html! {"in 3rd rollup"},
+            QueueStatus::InRollup { nth_rollup } => html! {"in "(nth_rollup)"th rollup"},
+            QueueStatus::InRunningRollup => html! {span {"in running rollup"}},
+            QueueStatus::InNextRollup { position: 1 } => html! {span {"rollup 1st in queue"}},
+            QueueStatus::InNextRollup { position: 2 } => html! {span {"rollup 2nd in queue"}},
+            QueueStatus::InNextRollup { position: 3 } => html! {span {"rollup 3rd in queue"}},
+            QueueStatus::InNextRollup { position } => {
+                html! {span {"rollup " (position)"th in queue"}}
             }
-        })
+            QueueStatus::Unknown => html! {},
+        }
     }
+}
 
-    match pr.ci_status {
-        CiStatus::Conflicted => badges.push(html! {
-            div class="ci-status conflict" title=(pr.ci_status) { (WARN) "conflict" }
-        }),
-        CiStatus::Good => badges.push(html! {
-            div class="ci-status good" title=(pr.ci_status) { (CHECKMARK) }
-        }),
-        CiStatus::Running => badges.push(html! {
-            div class="ci-status progress" title=(pr.ci_status) { (PROGRESS) }
-        }),
-        CiStatus::Bad => badges.push(html! {
-            div class="ci-status bad" title=(pr.ci_status) { (CROSS) }
-        }),
-        CiStatus::Unknown => {}
-        CiStatus::Draft => {}
+pub enum Badge<'a> {
+    CiStatus(&'a CiStatus),
+    WaitingReason(&'a WaitingReason),
+    RollupSetting(&'a RollupSetting),
+    QueueStatus(&'a QueueStatus),
+}
+
+impl Render for Badge<'_> {
+    fn render(&self) -> Markup {
+        match self {
+            Badge::CiStatus(ci_status) => ci_status.render(),
+            Badge::WaitingReason(waiting_reason) => html! {
+                div class="status-badge" {
+                    (waiting_reason)
+                }
+            },
+            Badge::RollupSetting(rollup_setting) => html! {
+                div class="status-badge" {
+                    (rollup_setting)
+                }
+            },
+            Badge::QueueStatus(queue_status) => html! {
+                div class="status-badge" {
+                    (queue_status)
+                }
+            },
+        }
     }
+}
 
-    if badges.is_empty() {
-        html!()
-    } else {
+impl Render for Author {
+    fn render(&self) -> Markup {
         html! {
-            div class="badges" {
-                @for badge in badges {
-                    (badge)
-                }
+            a class="author" href=(self.profile_url)
+                target="_blank" rel="noopener noreferrer"
+            {
+                img class="avatar" src=(self.avatar_url) alt=(format!("{}'s profile picture", self.name))
+                span class="name" {(self.name)}
             }
         }
     }
 }
 
-pub async fn render_pr(pr: &Pr) -> Markup {
+impl Render for CiStatus {
+    fn render(&self) -> Markup {
+        match self {
+            CiStatus::Conflicted => html! {
+                div class="ci-status conflict" title=("conflicted") { (WARN) "conflict" }
+            },
+            CiStatus::Good => html! {
+                div class="ci-status good" title=("passing") { (CHECKMARK) }
+            },
+            CiStatus::Running => html! {
+                div class="ci-status progress" title=("in progress") { (PROGRESS) }
+            },
+            CiStatus::Bad => html! {
+                div class="ci-status bad" title=("failing") { (CROSS) }
+            },
+            CiStatus::Unknown => html! {},
+            CiStatus::Draft => html! {},
+        }
+    }
+}
+
+impl Render for WaitingReason {
+    fn render(&self) -> Markup {
+        match self {
+            WaitingReason::Blocked => html! {
+                "blocked"
+            },
+            WaitingReason::TryBuild() => html! {},
+            WaitingReason::PerfRun() => html! {},
+            WaitingReason::CraterRun(crater_status) => match crater_status {
+                CraterStatus::Unknown => html! {
+                    "running crater, context unknown (bug?)"
+                },
+                CraterStatus::Queued { num_before } => html! {
+                    (format!("in crater queue ({} queued before this)", num_before))
+                },
+                CraterStatus::GeneratingReport => html! {
+                    "generating crater report"
+                },
+                CraterStatus::Running { expected_end } => {
+                    let duration = expected_end.duration_since(Timestamp::now());
+                    let span = Span::try_from(duration).unwrap();
+
+                    let options = SpanRound::new()
+                        .largest(Unit::Week)
+                        .smallest(Unit::Hour)
+                        .days_are_24_hours();
+
+                    html! {
+                        (format!("crater experiment done in {:#}", span.round(options).unwrap()))
+                    }
+                }
+            },
+            WaitingReason::Fcp(fcp_status) => {
+                // TODO: FCP concerns
+                let duration = fcp_status.ends_on().duration_since(Timestamp::now());
+                let span = Span::try_from(duration).unwrap();
+
+                let options = SpanRound::new()
+                    .largest(Unit::Week)
+                    .smallest(Unit::Hour)
+                    .days_are_24_hours();
+
+                html! {
+                    span {(format!("FCP ends in {:#}", span.round(options).unwrap()))}
+                }
+            }
+            WaitingReason::Author => html! {
+                "Waiting for author"
+            },
+            WaitingReason::Review => html! {
+                "Waiting for review"
+            },
+            WaitingReason::Unknown => html! {},
+        }
+    }
+}
+
+pub enum Field<'a> {
+    Reviewer(&'a Author),
+    Author(&'a Author),
+    Approver(&'a Author),
+    OtherReviewer(&'a Author),
+}
+
+impl Render for Field<'_> {
+    fn render(&self) -> Markup {
+        match self {
+            Field::Reviewer(author) => field("Reviewer", author),
+            Field::Author(author) => field("Author", author),
+            Field::OtherReviewer(author) => field("Other reviewer", author),
+            // TODO: should be bors approver
+            Field::Approver(author) => field("Approver", author),
+        }
+    }
+}
+
+fn pr_skeleton<'a>(
+    pr: &Pr,
+    fields: impl IntoIterator<Item = Field<'a>>,
+    badges: impl IntoIterator<Item = Badge<'a>>,
+) -> Markup {
     html! {
         div class="pr" {
             h2 class="title" { a target="_blank" rel="noopener noreferrer" href=(pr.link) {
@@ -223,21 +514,31 @@ pub async fn render_pr(pr: &Pr) -> Markup {
             }}
 
             a class="pr-link" target="_blank" rel="noopener noreferrer" href=(pr.link) {
-                (pr.repo.owner) "/" (pr.repo.name) "#" (pr.number)
+                (pr.repo) "#" (pr.number)
             }
 
             div class="fields" {
-                @if let Some(a) = pr.author() {
-                    (a)
-                }
-                @if let Some(r) = pr.reviewers() {
-                    (r)
-                }
-                @if let Some(r) = pr.rollup() {
-                    (field("status", r))
+                @for field in fields {
+                    (field)
                 }
 
-                (render_badges(pr))
+                div class="badges" {
+                    @for badge in badges {
+                        (badge)
+                    }
+                }
+
+                // @if let Some(a) = pr.author() {
+                //     (a)
+                // }
+                // @if let Some(r) = pr.reviewers() {
+                //     (r)
+                // }
+                // @if let Some(r) = pr.rollup() {
+                //     (field("status", r))
+                // }
+
+                // (render_badges(pr))
 
                 // (pr.ci_state)
             }
@@ -245,13 +546,16 @@ pub async fn render_pr(pr: &Pr) -> Markup {
     }
 }
 
-pub fn render_author(author: &Author) -> Markup {
-    html! {
-        a class="author" href=(author.url)
-            target="_blank" rel="noopener noreferrer"
-        {
-            img class="avatar" src=(author.avatar_url) alt=(format!("{}'s profile picture", author.login))
-            span class="name" {(author.login)}
-        }
-    }
-}
+// pub fn render_pr_box(prs: &[Pr], kind: PrSortCategory) -> Markup {
+//     let mut prs = prs
+//         .iter()
+//         .filter(|pr| pr.sort() == kind)
+//         .cloned()
+//         .collect::<Vec<_>>();
+
+//     if prs.is_empty() {
+//         return html! {};
+//     }
+
+//     prs.sort_by_cached_key(|pr| pr.created);
+// }
