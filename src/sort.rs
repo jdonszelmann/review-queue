@@ -76,6 +76,10 @@ async fn sort_queued(
                 .iter()
                 .enumerate()
             {
+                if !matches!(rollup.status, BorsStatus::Pending | BorsStatus::Success) {
+                    continue;
+                }
+
                 if rollup.pr_numbers.contains(&issue.number) {
                     rollup_status = if rollup.running {
                         QueueStatus::InRunningRollup {

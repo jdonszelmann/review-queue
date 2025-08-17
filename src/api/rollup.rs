@@ -3,7 +3,10 @@ use octocrab::Octocrab;
 use url::Url;
 
 use crate::{
-    api::{bors::BorsQueue, github::get_pr},
+    api::{
+        bors::{BorsQueue, BorsStatus},
+        github::get_pr,
+    },
     model::Repo,
 };
 
@@ -15,6 +18,7 @@ pub struct Rollup {
     pub running: bool,
     pub position_in_queue: usize,
     pub pr_numbers: Vec<u64>,
+    pub status: BorsStatus,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -66,6 +70,7 @@ pub async fn find_rollups(
             position_in_queue: pr.position_in_queue,
             pr_numbers,
             pr_link: html_url,
+            status: pr.status.clone(),
         });
     }
 
