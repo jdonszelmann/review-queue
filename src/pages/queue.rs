@@ -418,7 +418,7 @@ impl Render for QueueStatus {
             QueueStatus::Running => html! {span {"running"}},
             QueueStatus::InRollup { nth_rollup: 0, .. } => html! {"in next rollup"},
             QueueStatus::InRollup { nth_rollup, .. } => {
-                html! {"in "(Ordinal(nth_rollup - 1))" rollup"}
+                html! {"in "(Ordinal(nth_rollup + 1))" rollup"}
             }
             QueueStatus::InRunningRollup { .. } => html! {span {"in running rollup"}},
             QueueStatus::InNextRollup { position, .. } => {

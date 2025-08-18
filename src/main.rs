@@ -177,7 +177,7 @@ impl AppState {
                         }
                     }
                 },
-                Duration::from_secs(30),
+                Duration::from_secs(60 * 2),
             ),
             bors_info: Mutex::new(HashMap::new()),
             rollup_info: Mutex::new(HashMap::new()),
@@ -215,7 +215,7 @@ impl AppState {
                             }
                         }
                     },
-                    Duration::from_secs(30),
+                    Duration::from_secs(60),
                 )
             })
             .get()
