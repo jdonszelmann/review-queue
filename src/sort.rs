@@ -76,7 +76,10 @@ async fn sort_queued(
                 .iter()
                 .enumerate()
             {
-                if !matches!(rollup.status, BorsStatus::Pending | BorsStatus::Success) {
+                if !matches!(
+                    rollup.status,
+                    BorsStatus::Pending | BorsStatus::Success | BorsStatus::Approved
+                ) {
                     continue;
                 }
 
