@@ -110,6 +110,7 @@ async fn sort_queued(
 
         rollup_status
     } else {
+        tracing::warn!("bors was none for {}#{}", repo.repo, issue.number);
         QueueStatus::Unknown
     };
 
@@ -133,7 +134,7 @@ async fn sort_status(
 ) -> PrStatus {
     let bors_for_pr = bors_for_repo.for_pr(issue.number);
 
-    if pr.draft.is_some_and(|i| i) {
+    let res = if pr.draft.is_some_and(|i| i) {
         PrStatus::Draft {}
     } else if
     // you're assigned for review
@@ -171,7 +172,9 @@ async fn sort_status(
         PrStatus::Waiting {
             wait_reason: sort_waiting(login_context, issue, pr, bors_for_pr).await,
         }
-    }
+    };
+
+    res
 }
 
 fn ci_status(issue: &Issue, pr: &PullRequest, bors_for_repo: &Arc<BorsQueue>) -> CiStatus {

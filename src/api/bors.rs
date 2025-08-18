@@ -41,12 +41,12 @@ impl BorsQueue {
 }
 
 pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
-    // tracing::info!("reading bors page at {url}");
+    tracing::info!("requesting bors");
 
     // let mut pr_numbers = Vec::new();
     let mut prs = Vec::new();
 
-    let response = reqwest::get(url).await?;
+    let response = reqwest::get(url).await.context("get bors info")?;
     let body = response.text().await.context("body")?;
 
     {
@@ -87,7 +87,10 @@ pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
             };
 
             let mergeable = match mergeable.trim() {
-                "" => continue,
+                "" => {
+                    tracing::warn!("mergable empty");
+                    true
+                }
                 "yes" => true,
                 "no" => false,
                 other => {
@@ -112,11 +115,7 @@ pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
                 continue;
             };
 
-            // if title.starts_with("Rollup of") {
-            // pr_numbers.push((number, position_in_queue));
-            // }
-
-            prs.push(BorsPr {
+            let res = BorsPr {
                 pr_number: number,
                 approver: approver.trim().to_string(),
                 status,
@@ -126,7 +125,9 @@ pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
                 title: title.trim().to_string(),
                 position_in_queue: position_in_queue,
                 running: position_in_queue == 1,
-            });
+            };
+
+            prs.push(res);
         }
     }
 
