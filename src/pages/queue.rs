@@ -373,6 +373,11 @@ impl<'a> PrBox for DraftPrBox<'a> {
 fn render_pr_box(pr_box: impl PrBox) -> Markup {
     let mut res = Vec::new();
     pr_box.render(&mut res);
+
+    if res.is_empty() {
+        return html! {};
+    }
+
     res.sort_by_key(|(_, i)| *i);
 
     html! {
