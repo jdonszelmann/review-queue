@@ -1,24 +1,36 @@
-use std::{collections::BTreeMap, iter};
+use std::{collections::BTreeMap, iter, sync::Arc};
 
 use axum::{
     extract::{
         WebSocketUpgrade,
-        ws::{Message, Utf8Bytes},
+        ws::{Message, Utf8Bytes, WebSocket},
     },
     response::{IntoResponse, Redirect, Response},
 };
+use futures::{TryFutureExt, stream::SplitSink};
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use jiff::{Span, SpanRound, Timestamp, Unit};
 use maud::{DOCTYPE, Markup, PreEscaped, Render, html};
-use tokio::{select, spawn, time::sleep};
+use tokio::{
+    select, spawn,
+    sync::{
+        Mutex,
+        mpsc::{Receiver, Sender, channel},
+    },
+    task::JoinHandle,
+    time::sleep,
+};
 
 use crate::{
-    REFRESH_RATE, get_and_update_state, get_state_instantly,
+    REFRESH_RATE,
+    api::github::username_suggestions,
+    get_and_update_state, get_state_instantly,
+    login_cx::LoginContext,
     model::{
         Author, CiStatus, CraterStatus, Pr, PrStatus, QueueStatus, QueuedInfo, RollupSetting,
         WaitingReason,
     },
-    pages::auth::ExtractLoginContext,
+    pages::{QueuePageWebsocketMessageRx, QueuePageWebsocketMessageTx, auth::ExtractLoginContext},
 };
 
 const CHECKMARK: PreEscaped<&str> = PreEscaped(
@@ -67,6 +79,108 @@ pub fn page_template(body: Markup) -> Markup {
     }
 }
 
+async fn refresh_prs(config: Arc<LoginContext>, tx: Sender<QueuePageWebsocketMessageTx>) {
+    let prs = spawn(get_and_update_state(config.clone())).await.unwrap();
+    let page = queue_page_main(&prs);
+
+    let msg = QueuePageWebsocketMessageTx::UpdatePage {
+        main_contents: page.into_string(),
+    };
+
+    tx.send(msg).await.unwrap();
+}
+
+async fn receive_task(
+    login_context: Arc<LoginContext>,
+    tx: Sender<QueuePageWebsocketMessageTx>,
+    mut rx: Receiver<QueuePageWebsocketMessageRx>,
+) {
+    let mut current_update_task = None::<JoinHandle<()>>;
+
+    while let Some(msg) = rx.recv().await {
+        match msg {
+            QueuePageWebsocketMessageRx::UsernameSuggestions { current_value } => {
+                spawn({
+                    let login_context = login_context.clone();
+                    let tx = tx.clone();
+                    async move {
+                        let suggestions = username_suggestions(login_context, current_value).await;
+                        tx.send(QueuePageWebsocketMessageTx::UsernameSuggestions { suggestions })
+                            .await
+                            .unwrap();
+                    }
+                });
+            }
+            QueuePageWebsocketMessageRx::ResetUsername => {
+                tx.send(QueuePageWebsocketMessageTx::SetUsername {
+                    new_name: login_context.base_username.clone(),
+                })
+                .await
+                .unwrap();
+
+                login_context
+                    .change_username(login_context.base_username.clone())
+                    .await;
+
+                let new_pr_task = spawn(refresh_prs(login_context.clone(), tx.clone()));
+
+                // abort already running updates
+                if let Some(update_task) = current_update_task.replace(new_pr_task) {
+                    update_task.abort();
+                }
+            }
+            QueuePageWebsocketMessageRx::UsernameSelect { selected_name } => {
+                tx.send(QueuePageWebsocketMessageTx::SetUsername {
+                    new_name: selected_name.clone(),
+                })
+                .await
+                .unwrap();
+
+                login_context.change_username(selected_name).await;
+
+                let new_pr_task = spawn(refresh_prs(login_context.clone(), tx.clone()));
+
+                // abort already running updates
+                if let Some(update_task) = current_update_task.replace(new_pr_task) {
+                    update_task.abort();
+                }
+            }
+            QueuePageWebsocketMessageRx::UpdatePrs => {
+                if current_update_task.is_none() {
+                    current_update_task =
+                        Some(spawn(refresh_prs(login_context.clone(), tx.clone())));
+                }
+            }
+        }
+    }
+}
+
+async fn send_task(
+    mut rx: Receiver<QueuePageWebsocketMessageTx>,
+    mut tx: SplitSink<WebSocket, Message>,
+) {
+    while let Some(msg) = rx.recv().await {
+        let msg = match serde_json::to_string(&msg) {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::error!("error serializing message: {e}");
+                continue;
+            }
+        };
+
+        tx.send(Message::Text(Utf8Bytes::from(msg))).await.unwrap();
+    }
+}
+
+async fn refresh_loop_task(tx: Sender<QueuePageWebsocketMessageRx>) {
+    loop {
+        tx.send(QueuePageWebsocketMessageRx::UpdatePrs)
+            .await
+            .unwrap();
+        sleep(REFRESH_RATE).await;
+    }
+}
+
 pub async fn queue_ws(
     ExtractLoginContext(config): ExtractLoginContext,
     ws: WebSocketUpgrade,
@@ -76,21 +190,36 @@ pub async fn queue_ws(
     };
 
     ws.on_upgrade(async move |socket| {
-        let (mut send, mut recv) = socket.split();
+        let (tx, mut rx) = socket.split();
 
-        select! {
-            _ = async {
-                while let Some(_) = recv.next().await {}
-            } => {}
-            _ = async {
-                loop {
-                    let prs = spawn(get_and_update_state(config.clone())).await.unwrap();
-                    let page = queue_page_main(&prs);
-                    let _ = send.send(Message::Text(Utf8Bytes::from(&page.into_string()))).await;
-                    sleep(REFRESH_RATE).await;
+        let (rtx, rrx) = channel(5);
+        let (stx, srx) = channel(5);
+
+        spawn(receive_task(config.clone(), stx, rrx));
+        spawn(send_task(srx, tx));
+        let refesh_task = spawn(refresh_loop_task(rtx.clone()));
+
+        while let Some(msg) = rx.next().await {
+            let msg = match msg {
+                Ok(i) => i,
+                Err(e) => {
+                    tracing::error!("websocket error: {e}");
+                    continue;
                 }
-            } => {}
-        };
+            };
+
+            let msg: QueuePageWebsocketMessageRx = match serde_json::from_slice(&msg.into_data()) {
+                Ok(i) => i,
+                Err(e) => {
+                    tracing::error!("unknown websocket message: {e}");
+                    continue;
+                }
+            };
+
+            rtx.send(msg).await.unwrap();
+        }
+
+        refesh_task.abort();
     })
     .into_response()
 }
@@ -110,10 +239,22 @@ pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Res
     page_template(html! {
         nav {
             div class="backend-status" {
-                span {"last refreshed: "} span id="refresh-time" {"never (the first refresh can take a few seconds)"}
+                span id="refresh-time" {"getting PR data..."}
             }
 
             div class="divider" {}
+
+            form id="change-username" autocomplete="off" {
+                label r#for="change-username" {
+                    "dashboard for user: "
+                }
+                input r#type="text" id="change-username-input" name="change-username" value=(config.username().await) {}
+
+                ol id="suggestions-popup" role="listbox" {
+
+                }
+            }
+            button r#type="button" id="change-username-reset" {"Reset"}
 
             div class="logout" {
                 a href="/logout" {
@@ -126,17 +267,11 @@ pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Res
 
         script {
             (PreEscaped(format!(r#"
-                const socket = new WebSocket("{ws_url}");
-                socket.addEventListener("message", (event) => {{
-                    console.log("replacing main");
-                    document.getElementById("main").outerHTML = event.data;
-
-                    const d = new Date();
-                    const n = d.toLocaleTimeString();
-                    document.getElementById("refresh-time").innerText = n;
-                }});
+                const WEBSOCKET_URL = "{ws_url}"
             "#)))
         }
+
+        script src="/assets/queue.js" {}
     })
     .into_response()
 }
@@ -148,6 +283,7 @@ fn queue_page_main(prs: &[Pr]) -> Markup {
             (render_pr_box(ReviewPrBox(prs)))
             (render_pr_box(BlockedPrBox(prs)))
             (render_pr_box(QueuedPrBox(prs)))
+            (render_pr_box(SubscribedPrBox(prs)))
             (render_pr_box(DraftPrBox(prs)))
         }
     }
@@ -156,7 +292,7 @@ fn queue_page_main(prs: &[Pr]) -> Markup {
 trait PrBox {
     type SortKey: Ord + Copy;
 
-    fn title(&self) -> impl AsRef<str>;
+    fn title(&self) -> impl Render;
     fn render(&self, res: &mut Vec<(Markup, Self::SortKey)>);
 }
 
@@ -165,7 +301,7 @@ struct ReadyPrBox<'a>(&'a [Pr]);
 impl<'a> PrBox for ReadyPrBox<'a> {
     type SortKey = &'a Timestamp;
 
-    fn title(&self) -> impl AsRef<str> {
+    fn title(&self) -> impl Render {
         "Ready to work on"
     }
 
@@ -192,7 +328,7 @@ struct ReviewPrBox<'a>(&'a [Pr]);
 impl<'a> PrBox for ReviewPrBox<'a> {
     type SortKey = &'a Timestamp;
 
-    fn title(&self) -> impl AsRef<str> {
+    fn title(&self) -> impl Render {
         "Waiting for me to review"
     }
 
@@ -220,7 +356,7 @@ struct BlockedPrBox<'a>(&'a [Pr]);
 impl<'a> PrBox for BlockedPrBox<'a> {
     type SortKey = &'a Timestamp;
 
-    fn title(&self) -> impl AsRef<str> {
+    fn title(&self) -> impl Render {
         "Waiting"
     }
 
@@ -265,7 +401,7 @@ struct QueuedPrBox<'a>(&'a [Pr]);
 impl<'a> PrBox for QueuedPrBox<'a> {
     type SortKey = QueuedSortKey<'a>;
 
-    fn title(&self) -> impl AsRef<str> {
+    fn title(&self) -> impl Render {
         "Queued"
     }
 
@@ -350,7 +486,7 @@ struct DraftPrBox<'a>(&'a [Pr]);
 impl<'a> PrBox for DraftPrBox<'a> {
     type SortKey = &'a Timestamp;
 
-    fn title(&self) -> impl AsRef<str> {
+    fn title(&self) -> impl Render {
         "Drafts"
     }
 
@@ -370,6 +506,35 @@ impl<'a> PrBox for DraftPrBox<'a> {
     }
 }
 
+struct SubscribedPrBox<'a>(&'a [Pr]);
+
+impl<'a> PrBox for SubscribedPrBox<'a> {
+    type SortKey = &'a Timestamp;
+
+    fn title(&self) -> impl Render {
+        "Subscribed"
+    }
+
+    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+        for i in self.0 {
+            let PrStatus::Subscribed {} = &i.status else {
+                continue;
+            };
+
+            res.push((
+                pr_skeleton(
+                    i,
+                    iter::once(Field::Author(&i.author))
+                        // TODO: only other reviewers?
+                        .chain(i.reviewers.iter().map(Field::Reviewer)),
+                    vec![],
+                ),
+                &i.created,
+            ));
+        }
+    }
+}
+
 fn render_pr_box(pr_box: impl PrBox) -> Markup {
     let mut res = Vec::new();
     pr_box.render(&mut res);
@@ -382,7 +547,7 @@ fn render_pr_box(pr_box: impl PrBox) -> Markup {
 
     html! {
         div class="prbox" {
-            h1 { (pr_box.title().as_ref()) }
+            h1 { (pr_box.title()) }
             div class="prs" {
                 @for (pr, _) in res {
                     (pr)

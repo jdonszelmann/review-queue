@@ -23,9 +23,9 @@ use oauth2::{
 };
 use octocrab::Octocrab;
 use reqwest::{Client, StatusCode};
-use rust_query::FromExpr;
+use rust_query::{FromExpr, optional};
 use time::OffsetDateTime;
-use tokio::task::spawn_blocking;
+use tokio::{sync::Mutex, task::spawn_blocking};
 use url::Url;
 
 use crate::{AppState, db::OauthState};
@@ -145,7 +145,7 @@ pub async fn callback(
     {
         Ok(i) => i,
         Err(e) => {
-            tracing::error!("{e}");
+            tracing::error!("token response error: {e}");
             return Err(LoginError);
         }
     };
@@ -195,27 +195,31 @@ impl FromRequestParts<Arc<AppState>> for ExtractLoginContext {
             .personal_token(token.value())
             .build()
             .map_err(|e| {
-                tracing::error!("{e}");
+                tracing::error!("personal token error: {e}");
                 LoginError.into_response()
             })?;
 
         let user: octocrab::models::SimpleUser =
             octocrab.get("/user", None::<&()>).await.map_err(|e| {
-                tracing::error!("{e}");
+                tracing::error!("get user error: {e}");
                 LoginError.into_response()
             })?;
 
-        spawn_blocking({
+        let current_username = spawn_blocking({
             let user = user.clone();
             let state = state.clone();
             move || {
                 state.db.transaction_mut_ok(|txn| {
-                    txn.find_or_insert(User {
+                    let user = txn.find_or_insert(User {
                         username: user.login.clone(),
+                        current_username: user.login.clone(),
                         refresh_rate_seconds: 2 * 60,
                         sequence_number: 0,
                     });
-                });
+
+                    let data: User!(current_username) = txn.query_one(FromExpr::from_expr(user));
+                    data.current_username
+                })
             }
         })
         .await
@@ -223,7 +227,9 @@ impl FromRequestParts<Arc<AppState>> for ExtractLoginContext {
 
         Ok(Self(Some(Arc::new(LoginContext {
             octocrab,
-            username: user.login,
+            current_username: Mutex::new(current_username),
+            base_username: user.login,
+
             repos: vec![RepoInfo {
                 repo: Repo {
                     owner: "rust-lang".to_string(),

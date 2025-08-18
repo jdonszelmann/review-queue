@@ -1,6 +1,7 @@
 use std::{fmt::Display, ops::Deref};
 
 use jiff::{SignedDuration, Timestamp};
+use serde::Serialize;
 use url::Url;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -42,7 +43,7 @@ impl FcpStatus {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Author {
     pub name: String,
     pub id: u64,
@@ -116,6 +117,7 @@ pub enum PrStatus {
     /// Approved & Queued
     Queued(QueuedInfo),
     Draft {},
+    Subscribed,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -125,6 +125,7 @@ async fn sort_queued(
 
 async fn sort_status(
     login_context: &LoginContext,
+    username: String,
     repo: &RepoInfo,
     issue: &Issue,
     pr: &PullRequest,
@@ -136,7 +137,7 @@ async fn sort_status(
         PrStatus::Draft {}
     } else if
     // you're assigned for review
-    issue.assignees.iter().any(|i| i.login == login_context.username)
+    issue.assignees.iter().any(|i| i.login == username)
         // and it's waiting for review
         && label(issue, "S-waiting-on-review")
     {
@@ -144,13 +145,13 @@ async fn sort_status(
             other_reviewers: issue
                 .assignees
                 .iter()
-                .filter(|i| i.login != login_context.username)
+                .filter(|i| i.login != username)
                 .map(convert_author)
                 .collect(),
         }
     } else if
     // you're the creator of the PR
-    issue.user.login == login_context.username
+    issue.user.login == username
         // and it's waiting for the author
         && label(issue, "S-waiting-on-author")
     {
@@ -247,16 +248,30 @@ fn ci_status(issue: &Issue, pr: &PullRequest, bors_for_repo: &Arc<BorsQueue>) ->
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum PredeterminedCategory {
+    Subscribed,
+    None(PullRequest),
+}
+
 pub async fn sort(
     login_context: &LoginContext,
+    username: String,
     repo: &RepoInfo,
     issue: &Issue,
-    pr: &PullRequest,
-) -> Pr {
-    tracing::info!("sorting PR {}#{} {}", repo.repo, pr.number, issue.title);
+    predetermined_category: PredeterminedCategory,
+) -> Option<Pr> {
+    tracing::info!("sorting PR {}#{} {}", repo.repo, issue.number, issue.title);
     let bors_for_repo = login_context.state.bors_info(repo.clone()).await;
 
-    Pr {
+    // no subscribed issues when impersonating
+    if let PredeterminedCategory::Subscribed = predetermined_category
+        && login_context.base_username != username
+    {
+        return None;
+    }
+
+    Some(Pr {
         repo: repo.repo.clone(),
         title: issue.title.clone(),
         description: issue.body.clone(),
@@ -264,13 +279,22 @@ pub async fn sort(
         link: issue.html_url.clone(),
         author: convert_author(&issue.user),
         reviewers: issue.assignees.iter().map(convert_author).collect(),
-        status: sort_status(login_context, repo, issue, pr, &bors_for_repo).await,
-        ci_status: ci_status(issue, pr, &bors_for_repo),
+        status: match &predetermined_category {
+            PredeterminedCategory::None(pr) => {
+                sort_status(login_context, username, repo, issue, pr, &bors_for_repo).await
+            }
+            PredeterminedCategory::Subscribed => PrStatus::Subscribed,
+        },
+        ci_status: match &predetermined_category {
+            PredeterminedCategory::None(pr) => ci_status(issue, pr, &bors_for_repo),
+            PredeterminedCategory::Subscribed => CiStatus::Unknown,
+        },
+
         created: jiff::Timestamp::from_second(issue.created_at.timestamp()).unwrap(),
-    }
+    })
 }
 
-fn convert_author(author: &octocrab::models::Author) -> Author {
+pub fn convert_author(author: &octocrab::models::Author) -> Author {
     Author {
         name: author.login.clone(),
         id: *author.id,

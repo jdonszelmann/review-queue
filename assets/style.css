@@ -45,6 +45,11 @@ html {
     --base-width: 20em;
     --main-padding: 1em;
     --pr-gap: 1em;
+
+    --nav-height: 4.5em;
+    @media (width > 40em) {
+        --nav-height: 3em;
+    }
 }
 
 a {
@@ -53,30 +58,70 @@ a {
 }
 
 nav {
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-areas:
+        "change-username change-username change-username change-username reset"
+        "refresh          refresh         refresh        refresh         logout";
 
-    height: 3em;
-    align-items: center;
+    flex-direction: column;
+    height: unset;
+    gap: 0.5em;
 
-    padding: 0em var(--main-padding);
-
-    backend-status {
-        display: flex;
+    @media (width > 24em) {
+        height: var(--nav-height);
         flex-direction: row;
+        display: flex;
+        gap: 0.25em;
+    }
+
+    align-items: end;
+
+    @media (width > 40em) {
+        align-items: center;
         gap: 1em;
     }
 
+    padding: 0em var(--main-padding);
+
+    font-size: smaller;
+    @media (width > 30em) {
+        font-size: small;
+    }
+    @media (width > 55em) {
+        font-size: inherit;
+    }
+
+    .backend-status {
+        align-self: center;
+        grid-area: refresh;
+    }
+
     .divider {
+        display: none;
         margin-left: auto;
+        @media (width > 30em) {
+            display: block;
+        }
     }
 
     .logout {
-        background-color: #212830;
-        border-radius: 0.5em;
-        border: 0.05rem solid;
-        padding: 0.5em 1em;
+        grid-area: logout;
     }
+}
+
+button,
+.logout,
+input {
+    all: unset;
+    background-color: #212830;
+    border-radius: 0.5em;
+    border: 0.05rem solid;
+    padding: 0.5em 1em;
+    cursor: pointer;
+}
+
+input {
+    cursor: text;
 }
 
 main {
@@ -292,7 +337,7 @@ main {
     .login {
         background-color: #212830;
         border-radius: 0.5em;
-        border: 0.05rem solid;
+        border: 1px solid;
         padding: 2em;
 
         .button-container {
@@ -305,6 +350,72 @@ main {
                 padding: 0.5em 1em;
                 background: #347d39;
             }
+        }
+    }
+}
+
+#change-userame-reset {
+    grid-area: reset;
+}
+
+#change-username {
+    display: flex;
+
+    align-items: end;
+    flex-direction: column;
+
+    grid-area: change-username;
+
+    @media (width > 40em) {
+        align-items: center;
+        flex-direction: row;
+    }
+
+    input {
+        width: 100%;
+        box-sizing: border-box;
+        @media (width > 40em) {
+            width: unset;
+        }
+        @media (width > 24em) {
+            width: 10em;
+        }
+    }
+
+    gap: 0.25em;
+    position: relative;
+
+    #suggestions-popup {
+        box-sizing: border-box;
+        margin: 0;
+
+        z-index: 10;
+
+        background-color: #151b23;
+        border-radius: 0.5em;
+        border: 1px solid;
+
+        position: absolute;
+        display: none;
+
+        flex-direction: column;
+        gap: 0.3em;
+        padding: 1em;
+
+        left: 0;
+        width: 100%;
+        @media (width > 24em) {
+            right: 0;
+            width: unset;
+        }
+        top: var(--nav-height);
+
+        .username-suggestion {
+            height: 1.5em;
+            cursor: pointer;
+        }
+        .username-suggestion[aria-selected="true"] {
+            background-color: #212830;
         }
     }
 }

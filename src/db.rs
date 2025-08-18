@@ -6,11 +6,14 @@ use rust_query::{
 };
 
 #[schema(Schema)]
-#[version(0..=0)]
+#[version(0..=1)]
 pub mod vN {
     pub struct User {
         #[unique]
         pub username: String,
+
+        #[version(1..)]
+        pub current_username: String,
 
         /// put in issues to know which ones are old
         pub sequence_number: i64,
@@ -35,11 +38,17 @@ pub mod vN {
     }
 }
 
-pub use v0::*;
+pub use v1::*;
 
 pub fn migrate(db_path: PathBuf) -> Database<Schema> {
     let m = Database::migrator(Config::open(db_path))
         .expect("database is older than supported versions");
+
+    let m = m.migrate(|txn| v0::migrate::Schema {
+        user: txn.migrate_ok(|old: v0::User!(username)| v0::migrate::User {
+            current_username: old.username.clone(),
+        }),
+    });
 
     m.finish()
         .expect("database is newer than supported versions")

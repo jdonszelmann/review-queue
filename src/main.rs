@@ -74,15 +74,19 @@ async fn get_state_instantly(config: Arc<LoginContext>) -> Vec<Pr> {
     let state = config.state.users_prs_by_username.read().await;
 
     state
-        .get(&config.username)
+        .get(&config.username().await)
         .map(|i| i.prs.get().cloned().unwrap_or_else(|| i.old.clone()))
         .unwrap_or_default()
 }
 
-async fn update_prs_database(prs: &[Pr], config: Arc<LoginContext>) {
+async fn update_prs_database(prs: &[Pr], username: String, config: Arc<LoginContext>) {
+    if config.base_username != username {
+        return;
+    }
+
     config.state.db.transaction_mut_ok(|txn| {
         let user_row = txn
-            .query_one(User::unique(&config.username))
+            .query_one(User::unique(&config.base_username))
             .expect("logged in");
 
         txn.update_ok(
@@ -116,24 +120,25 @@ async fn update_prs_database(prs: &[Pr], config: Arc<LoginContext>) {
 }
 
 async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<Pr> {
-    tracing::info!("refreshing for user {}", config.username);
+    let username = config.username().await;
+    tracing::info!("refreshing for user {username}");
 
     {
         let mut state = config.state.users_prs_by_username.write().await;
-        let data = state.entry(config.username.clone()).or_default();
+        let data = state.entry(username.clone()).or_default();
         data.old = data.prs.take().unwrap_or_default();
     };
 
     let state = config.state.users_prs_by_username.read().await;
-    let user_state = state.get(&config.username).expect("just inserted");
+    let user_state = state.get(&username).expect("just inserted");
 
     user_state
         .prs
         .get_or_init(async || {
-            let pr_stream = scrape_github_for_user(config.clone());
+            let pr_stream = scrape_github_for_user(config.clone(), username.clone());
             let prs: Vec<_> = pr_stream.collect().await;
 
-            update_prs_database(&prs, config.clone()).await;
+            update_prs_database(&prs, username.clone(), config.clone()).await;
 
             prs
         })
