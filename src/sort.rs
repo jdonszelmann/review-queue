@@ -21,8 +21,8 @@ fn label(issue: &Issue, label: impl AsRef<str>) -> bool {
 async fn sort_waiting(
     login_context: &LoginContext,
     issue: &Issue,
-    pr: &PullRequest,
-    bors_for_pr: Option<&BorsPr>,
+    _pr: &PullRequest,
+    _bors_for_pr: Option<&BorsPr>,
 ) -> WaitingReason {
     if label(issue, "S-waiting-on-author") {
         WaitingReason::Author
