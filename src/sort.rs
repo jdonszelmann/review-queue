@@ -88,18 +88,21 @@ async fn sort_queued(
                         QueueStatus::InRunningRollup {
                             pr_link: rollup.pr_link.clone(),
                             pr_number: rollup.pr_number,
+                            rollup_size: rollup.pr_numbers.len(),
                         }
                     } else if idx == 0 {
                         QueueStatus::InNextRollup {
                             position: rollup.position_in_queue,
                             pr_link: rollup.pr_link.clone(),
                             pr_number: rollup.pr_number,
+                            rollup_size: rollup.pr_numbers.len(),
                         }
                     } else {
                         QueueStatus::InRollup {
                             nth_rollup: idx,
                             pr_link: rollup.pr_link.clone(),
                             pr_number: rollup.pr_number,
+                            rollup_size: rollup.pr_numbers.len(),
                         }
                     };
 

@@ -7,16 +7,13 @@ use axum::{
     },
     response::{IntoResponse, Redirect, Response},
 };
-use futures::{TryFutureExt, stream::SplitSink};
+use futures::stream::SplitSink;
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use jiff::{Span, SpanRound, Timestamp, Unit};
 use maud::{DOCTYPE, Markup, PreEscaped, Render, html};
 use tokio::{
-    select, spawn,
-    sync::{
-        Mutex,
-        mpsc::{Receiver, Sender, channel},
-    },
+    spawn,
+    sync::mpsc::{Receiver, Sender, channel},
     task::JoinHandle,
     time::sleep,
 };
@@ -406,7 +403,7 @@ impl<'a> PrBox for QueuedPrBox<'a> {
     }
 
     fn render(&self, res: &mut Vec<(Markup, Self::SortKey)>) {
-        let mut rollups = BTreeMap::<RollupPosition, (Vec<(Markup, _)>, _, _)>::new();
+        let mut rollups = BTreeMap::<RollupPosition, (Vec<(Markup, _)>, _, _, _)>::new();
 
         for i in self.0 {
             let PrStatus::Queued(QueuedInfo {
@@ -440,34 +437,40 @@ impl<'a> PrBox for QueuedPrBox<'a> {
                     position,
                     pr_link,
                     pr_number,
+                    rollup_size,
                 } => rollups
                     .entry(RollupPosition::Next(*position))
-                    .or_insert((Vec::new(), pr_link.clone(), *pr_number))
+                    .or_insert((Vec::new(), pr_link.clone(), *pr_number, rollup_size))
                     .0
                     .push((skeleton, &i.created)),
                 QueueStatus::InRollup {
                     nth_rollup,
                     pr_link,
                     pr_number,
+                    rollup_size,
                 } => rollups
                     .entry(RollupPosition::Nth(*nth_rollup))
-                    .or_insert((Vec::new(), pr_link.clone(), *pr_number))
+                    .or_insert((Vec::new(), pr_link.clone(), *pr_number, rollup_size))
                     .0
                     .push((skeleton, &i.created)),
-                QueueStatus::InRunningRollup { pr_link, pr_number } => rollups
+                QueueStatus::InRunningRollup {
+                    pr_link,
+                    pr_number,
+                    rollup_size,
+                } => rollups
                     .entry(RollupPosition::Next(0))
-                    .or_insert((Vec::new(), pr_link.clone(), *pr_number))
+                    .or_insert((Vec::new(), pr_link.clone(), *pr_number, rollup_size))
                     .0
                     .push((skeleton, &i.created)),
             }
         }
 
-        for (pos, (mut group, pr_link, pr_number)) in rollups {
+        for (pos, (mut group, pr_link, pr_number, rollup_size)) in rollups {
             group.sort_by_key(|(_, i)| *i);
             res.push((
                 html! {
                     div class="rollup" style=(format!("--num-prs-in-rollup: {};", group.len())) {
-                        h4 {a href=(pr_link) target="_blank" rel="noopener noreferrer" {"Rollup #" (pr_number)}}
+                        h4 {a href=(pr_link) target="_blank" rel="noopener noreferrer" {"Rollup #" (pr_number) " of " (rollup_size) " prs"}}
                         div class="contents" {
                             @for (pr, _) in group {
                                 (pr)

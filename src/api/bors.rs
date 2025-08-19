@@ -43,7 +43,6 @@ impl BorsQueue {
 pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
     tracing::info!("requesting bors");
 
-    // let mut pr_numbers = Vec::new();
     let mut prs = Vec::new();
 
     let response = reqwest::get(url).await.context("get bors info")?;

@@ -62,15 +62,18 @@ pub enum QueueStatus {
         position: usize,
         pr_link: Url,
         pr_number: u64,
+        rollup_size: usize,
     },
     InRollup {
         nth_rollup: usize,
         pr_link: Url,
         pr_number: u64,
+        rollup_size: usize,
     },
     InRunningRollup {
         pr_link: Url,
         pr_number: u64,
+        rollup_size: usize,
     },
 }
 
