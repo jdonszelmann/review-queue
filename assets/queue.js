@@ -104,12 +104,16 @@ function selectPrev() {
   });
 }
 
-function confirmSelect() {
+function confirmSelect(enter_pressed = false) {
   const popup = document.getElementById("suggestions-popup");
   const input_elem = document.getElementById("change-username-input");
   input_elem.blur();
 
-  if (current_option === null) {
+  if (enter_pressed) {
+    console.log("force-select");
+    const input = document.getElementById("change-username-input");
+    select_username(input.value);
+  } else if (current_option === null) {
     close_popup(false);
   } else {
     available_options[current_option].click();
@@ -230,7 +234,7 @@ addEventListener("DOMContentLoaded", (event) => {
         event.preventDefault();
         break;
       case "Enter":
-        confirmSelect();
+        confirmSelect(true);
         break;
       case "Esc":
         close_popup(true);
