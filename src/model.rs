@@ -95,6 +95,12 @@ pub struct Pr {
     pub created: Timestamp,
 }
 
+impl Pr {
+    pub fn is_rollup_pr(&self) -> bool {
+        self.title.starts_with("Rollup of") && self.title.ends_with("pull requests")
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum CiStatus {
     Conflicted,

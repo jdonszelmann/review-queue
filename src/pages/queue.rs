@@ -415,6 +415,10 @@ impl<'a> PrBox for QueuedPrBox<'a> {
                 continue;
             };
 
+            if i.is_rollup_pr() {
+                continue;
+            }
+
             // TODO: draft should store whether it's yours or someone elses
             // if someone elses, show author
             let skeleton = pr_skeleton(
