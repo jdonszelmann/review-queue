@@ -579,10 +579,11 @@ struct Ordinal(usize);
 impl Render for Ordinal {
     fn render(&self) -> Markup {
         let number = self.0;
-        match number % 10 {
-            1 => html! {(format!("{number}st"))},
-            2 => html! {(format!("{number}nd"))},
-            3 => html! {(format!("{number}rd"))},
+        match (number, number % 10) {
+            (11 | 12 | 13, _) => html! {(format!("{number}th"))},
+            (_, 1) => html! {(format!("{number}st"))},
+            (_, 2) => html! {(format!("{number}nd"))},
+            (_, 3) => html! {(format!("{number}rd"))},
             _ => html! {(format!("{number}th"))},
         }
     }
