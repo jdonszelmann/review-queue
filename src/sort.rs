@@ -124,6 +124,7 @@ async fn sort_queued(
             .map(|i| i.rollup_setting.clone())
             .unwrap_or_default(),
         queue_status: rollup_status,
+        url: bors_for_pr.map(|i| i.url.clone()),
     }
 }
 

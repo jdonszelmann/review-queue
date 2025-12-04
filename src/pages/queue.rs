@@ -17,6 +17,7 @@ use tokio::{
     task::JoinHandle,
     time::sleep,
 };
+use url::Url;
 
 use crate::{
     REFRESH_RATE,
@@ -410,6 +411,7 @@ impl<'a> PrBox for QueuedPrBox<'a> {
                 approvers,
                 rollup_setting,
                 queue_status,
+                url,
             }) = &i.status
             else {
                 continue;
@@ -426,7 +428,10 @@ impl<'a> PrBox for QueuedPrBox<'a> {
                 iter::once(Field::Author(&i.author)).chain(approvers.iter().map(Field::Approver)),
                 vec![
                     Badge::RollupSetting(rollup_setting),
-                    Badge::QueueStatus(queue_status),
+                    Badge::QueueStatus(QueueStatusWithUrl {
+                        status: queue_status,
+                        url: url.as_ref(),
+                    }),
                     Badge::CiStatus(&i.ci_status),
                 ],
             );
@@ -607,11 +612,33 @@ impl Render for QueueStatus {
     }
 }
 
+pub struct QueueStatusWithUrl<'a> {
+    status: &'a QueueStatus,
+    url: Option<&'a Url>,
+}
+
+impl<'a> Render for QueueStatusWithUrl<'a> {
+    fn render(&self) -> Markup {
+        let Self {
+            status,
+            url: Some(url),
+        } = self
+        else {
+            return self.status.render();
+        };
+        html! {
+            a href=(url) {
+                (status)
+            }
+        }
+    }
+}
+
 pub enum Badge<'a> {
     CiStatus(&'a CiStatus),
     WaitingReason(&'a WaitingReason),
     RollupSetting(&'a RollupSetting),
-    QueueStatus(&'a QueueStatus),
+    QueueStatus(QueueStatusWithUrl<'a>),
 }
 
 impl Render for Badge<'_> {

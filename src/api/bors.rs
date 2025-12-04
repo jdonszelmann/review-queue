@@ -27,6 +27,7 @@ pub struct BorsPr {
     pub title: String,
     pub position_in_queue: usize,
     pub running: bool,
+    pub url: Url,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -45,7 +46,7 @@ pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
 
     let mut prs = Vec::new();
 
-    let response = reqwest::get(url).await.context("get bors info")?;
+    let response = reqwest::get(url.clone()).await.context("get bors info")?;
     let body = response.text().await.context("body")?;
 
     {
@@ -124,6 +125,7 @@ pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
                 title: title.trim().to_string(),
                 position_in_queue: position_in_queue,
                 running: position_in_queue == 1,
+                url: url.clone(),
             };
 
             prs.push(res);

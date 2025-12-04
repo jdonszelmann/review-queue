@@ -322,6 +322,10 @@ main {
         align-items: center;
 
         line-height: 1em;
+
+        a {
+            color: unset;
+        }
     }
 }
 
