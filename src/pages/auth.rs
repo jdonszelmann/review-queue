@@ -79,10 +79,10 @@ pub async fn login(
 
     let (mut authorize_url, csrf_state) = client
         .authorize_url(oauth2::CsrfToken::new_random)
-        .add_scope(oauth2::Scope::new("user:email".to_string()))
-        .add_scope(oauth2::Scope::new("read:user".to_string()))
-        .add_scope(oauth2::Scope::new("read:org".to_string()))
-        .add_scope(oauth2::Scope::new("public_repo".to_string()))
+        // .add_scope(oauth2::Scope::new("user:email".to_string()))
+        // .add_scope(oauth2::Scope::new("read:user".to_string()))
+        // .add_scope(oauth2::Scope::new("read:org".to_string()))
+        // .add_scope(oauth2::Scope::new("public_repo".to_string()))
         .set_pkce_challenge(pkce_code_challenge)
         .url();
     authorize_url
