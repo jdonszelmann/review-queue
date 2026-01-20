@@ -32,7 +32,8 @@
         packages = rec {
           reviewqueue-bin = naersk'.buildPackage {
             src = ./.;
-            nativeBuildInputs = with pkgs; [sqlite];
+            nativeBuildInputs = with pkgs; [sqlite pkg-config openssl_3];
+	    PKG_CONFIG_PATH = "${pkgs.openssl_3.dev}/lib/pkgconfig";
           };
           default = pkgs.stdenv.mkDerivation {
             name = "reviewqueue";
