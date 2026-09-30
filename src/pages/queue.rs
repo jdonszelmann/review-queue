@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, iter, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    iter,
+    sync::Arc,
+};
 
 use axum::{
     extract::{
@@ -275,10 +279,19 @@ pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Res
 }
 
 fn queue_page_main(issues_or_prs: &[IssueOrPr]) -> Markup {
+    let mut issue_names = HashSet::new();
+
     let mut issues = Vec::new();
     let mut prs = Vec::new();
 
     for i in issues_or_prs {
+        if !match i {
+            IssueOrPr::Pr(pr) => issue_names.insert(&pr.title),
+            IssueOrPr::Issue(issue) => issue_names.insert(&issue.title),
+        } {
+            continue;
+        }
+
         match i {
             IssueOrPr::Pr(pr) => prs.push(pr.clone()),
             IssueOrPr::Issue(issue) => issues.push(issue.clone()),
