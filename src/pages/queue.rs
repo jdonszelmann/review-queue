@@ -409,7 +409,6 @@ impl<'a> PrBox for QueuedPrBox<'a> {
         for i in self.0 {
             let PrStatus::Queued(QueuedInfo {
                 approvers,
-                rollup_setting,
                 queue_status,
                 url,
             }) = &i.status
@@ -427,7 +426,6 @@ impl<'a> PrBox for QueuedPrBox<'a> {
                 i,
                 iter::once(Field::Author(&i.author)).chain(approvers.iter().map(Field::Approver)),
                 vec![
-                    Badge::RollupSetting(rollup_setting),
                     Badge::QueueStatus(QueueStatusWithUrl {
                         status: queue_status,
                         url: url.as_ref(),
@@ -637,7 +635,6 @@ impl<'a> Render for QueueStatusWithUrl<'a> {
 pub enum Badge<'a> {
     CiStatus(&'a CiStatus),
     WaitingReason(&'a WaitingReason),
-    RollupSetting(&'a RollupSetting),
     QueueStatus(QueueStatusWithUrl<'a>),
 }
 
@@ -659,7 +656,6 @@ impl Render for Badge<'_> {
         match self {
             Badge::CiStatus(ci_status) => ci_status.render(),
             Badge::WaitingReason(waiting_reason) => maybe_badge(waiting_reason),
-            Badge::RollupSetting(rollup_setting) => maybe_badge(rollup_setting),
             Badge::QueueStatus(queue_status) => maybe_badge(queue_status),
         }
     }

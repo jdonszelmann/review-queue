@@ -214,7 +214,7 @@ impl AppState {
                             match get_bors_info(url.clone()).await {
                                 Ok(i) => i,
                                 Err(e) => {
-                                    tracing::error!("bors queue error: {e}");
+                                    tracing::error!("bors queue error: {e:?}");
                                     Default::default()
                                 }
                             }
@@ -300,12 +300,15 @@ async fn main() -> color_eyre::Result<()> {
         .with_state(Arc::new(AppState::new(db, config.clone())))
         .nest_service("/assets/", ServeDir::new(config.assets_dir.clone()));
 
-    let address = "0.0.0.0:3000";
+    let address = config
+        .host
+        .as_str()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
 
     let listener = tokio::net::TcpListener::bind(address).await.unwrap();
 
     tracing::info!("listening on http://{address}");
-
     axum::serve(listener, app.into_make_service())
         .await
         .unwrap();

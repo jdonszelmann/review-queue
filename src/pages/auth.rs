@@ -23,7 +23,7 @@ use oauth2::{
 };
 use octocrab::Octocrab;
 use reqwest::{Client, StatusCode};
-use rust_query::{FromExpr, optional};
+use rust_query::FromExpr;
 use time::OffsetDateTime;
 use tokio::{sync::Mutex, task::spawn_blocking};
 use url::Url;
@@ -235,7 +235,9 @@ impl FromRequestParts<Arc<AppState>> for ExtractLoginContext {
                     owner: "rust-lang".to_string(),
                     name: "rust".to_string(),
                 },
-                bors_queue_url: Some(Url::parse("https://bors.rust-lang.org/queue/rust").unwrap()),
+                bors_queue_url: Some(
+                    Url::parse("https://bors.rust-lang.org/api/queue/rust").unwrap(),
+                ),
             }],
             state: state.clone(),
         }))))

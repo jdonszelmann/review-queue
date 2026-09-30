@@ -33,12 +33,13 @@ pub async fn find_rollups(
 ) -> color_eyre::Result<RollupQueue> {
     let mut res = RollupQueue::default();
 
+    tracing::info!("rollup info");
     for pr in &bors_queue.items {
         if !pr.title.starts_with("Rollup of") {
             continue;
         }
 
-        let gh_pr = get_pr(&octocrab, repo.clone(), pr.pr_number)
+        let gh_pr = get_pr(&octocrab, repo.clone(), pr.number)
             .await
             .context("get PR")?;
 
@@ -65,7 +66,7 @@ pub async fn find_rollups(
         }
 
         res.rollups.push(Rollup {
-            pr_number: pr.pr_number,
+            pr_number: pr.number,
             running: pr.position_in_queue == 1,
             position_in_queue: pr.position_in_queue,
             pr_numbers,

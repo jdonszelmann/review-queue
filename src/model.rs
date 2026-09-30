@@ -141,7 +141,6 @@ pub enum RollupSetting {
 #[derive(Clone, Debug)]
 pub struct QueuedInfo {
     pub approvers: Vec<Author>,
-    pub rollup_setting: RollupSetting,
     pub queue_status: QueueStatus,
     pub url: Option<Url>,
 }

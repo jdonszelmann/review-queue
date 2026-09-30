@@ -76,13 +76,6 @@ async fn sort_queued(
                 .iter()
                 .enumerate()
             {
-                if !matches!(
-                    rollup.status,
-                    BorsStatus::Pending | BorsStatus::Success | BorsStatus::Approved
-                ) {
-                    continue;
-                }
-
                 if rollup.pr_numbers.contains(&issue.number) {
                     rollup_status = if rollup.running {
                         QueueStatus::InRunningRollup {
@@ -120,9 +113,6 @@ async fn sort_queued(
     QueuedInfo {
         // TODO: make this the bors approver
         approvers: issue.assignees.iter().map(convert_author).collect(),
-        rollup_setting: bors_for_pr
-            .map(|i| i.rollup_setting.clone())
-            .unwrap_or_default(),
         queue_status: rollup_status,
         url: bors_for_pr.map(|i| i.url.clone()),
     }
@@ -166,10 +156,7 @@ async fn sort_status(
     // - a try build
     // - it's in the queue
     // TODO: try build detection
-    label(issue, "S-waiting-on-bors")
-        || bors_for_pr
-            .is_some_and(|b| matches!(b.status, BorsStatus::Approved | BorsStatus::Pending))
-    {
+    label(issue, "S-waiting-on-bors") {
         PrStatus::Queued(sort_queued(login_context, repo, issue, bors_for_pr).await)
     } else {
         // the PR must be waiting for some reason. There are many reasons though...
@@ -187,55 +174,6 @@ fn ci_status(issue: &Issue, pr: &PullRequest, bors_for_repo: &Arc<BorsQueue>) ->
     match (pr.mergeable, &pr.mergeable_state, bors_for_pr) {
         _ if pr.draft.is_some_and(|i| i) => CiStatus::Draft,
         (Some(_), Some(MergeableState::Behind | MergeableState::Dirty), _) => CiStatus::Conflicted,
-
-        (
-            _,
-            _,
-            Some(BorsPr {
-                status: BorsStatus::Approved,
-                ..
-            }),
-        ) => CiStatus::Good,
-        (
-            _,
-            _,
-            Some(BorsPr {
-                status: BorsStatus::Error,
-                ..
-            }),
-        ) => CiStatus::Bad,
-        (
-            _,
-            _,
-            Some(BorsPr {
-                status: BorsStatus::Failure,
-                ..
-            }),
-        ) => CiStatus::Bad,
-        (
-            _,
-            _,
-            Some(BorsPr {
-                status: BorsStatus::Pending,
-                ..
-            }),
-        ) => CiStatus::Running,
-        (
-            _,
-            _,
-            Some(BorsPr {
-                status: BorsStatus::Success,
-                ..
-            }),
-        ) => CiStatus::Good,
-        (
-            _,
-            _,
-            Some(BorsPr {
-                status: BorsStatus::None,
-                ..
-            }),
-        ) => CiStatus::Unknown,
 
         // github: super unreliable
         (None, _, _) => CiStatus::Running,

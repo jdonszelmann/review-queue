@@ -1,4 +1,5 @@
 /target
+.direnv
 .env
 db.sqlite
 result

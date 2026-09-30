@@ -1,30 +1,43 @@
+use std::collections::HashMap;
+
 use color_eyre::eyre::Context;
-use scraper::{ElementRef, Html, Selector};
+use serde::Deserialize;
 use url::Url;
 
-use crate::model::RollupSetting;
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum BorsStatus {
-    None,
-    Approved,
-    Pending,
-    Failure,
-    Error,
-    Success,
+    Closed,
+    Draft,
+    Merged,
+    Open,
+    #[serde(untagged)]
     Other(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 #[allow(unused)]
+pub struct BorsApiPr {
+    pub number: Option<u64>,
+    pub author: Option<String>,
+    pub approver: Option<String>,
+    pub status: BorsStatus,
+    pub priority: Option<u64>,
+    pub title: String,
+
+    #[serde(flatten)]
+    other: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
 pub struct BorsPr {
-    pub pr_number: u64,
+    pub number: u64,
+    pub author: String,
     pub approver: String,
     pub status: BorsStatus,
-    pub mergeable: bool,
-    pub rollup_setting: RollupSetting,
     pub priority: u64,
     pub title: String,
+
     pub position_in_queue: usize,
     pub running: bool,
     pub url: Url,
@@ -37,100 +50,38 @@ pub struct BorsQueue {
 
 impl BorsQueue {
     pub fn for_pr(&self, pr_number: u64) -> Option<&BorsPr> {
-        self.items.iter().find(|i| i.pr_number == pr_number)
+        self.items.iter().find(|i| i.number == pr_number)
     }
 }
 
 pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
     tracing::info!("requesting bors");
 
-    let mut prs = Vec::new();
-
     let response = reqwest::get(url.clone()).await.context("get bors info")?;
-    let body = response.text().await.context("body")?;
+    let items: Vec<BorsApiPr> = response.json().await.context("body")?;
 
-    {
-        let document = Html::parse_document(&body);
-
-        let mut position_in_queue = 0;
-
-        let row_selector = Selector::parse("#queue tbody tr").unwrap();
-        for row in document.select(&row_selector) {
-            position_in_queue += 1;
-
-            let children = row
-                .children()
-                .filter_map(ElementRef::wrap)
-                .collect::<Vec<_>>();
-
-            let number = children[2].text().collect::<String>();
-            let status = children[3].text().collect::<String>();
-            let mergeable = children[4].text().collect::<String>();
-            let title = children[5].text().collect::<String>();
-            let approver = children[8].text().collect::<String>();
-            let priority = children[9].text().collect::<String>();
-            let rollup = children[10].text().collect::<String>();
-
-            let Ok(number) = number.trim().parse::<u64>() else {
-                tracing::error!("parse PR number");
-                continue;
-            };
-
-            let status = match status.trim() {
-                "" => BorsStatus::None,
-                "error" => BorsStatus::Error,
-                "failure" => BorsStatus::Failure,
-                "approved" => BorsStatus::Approved,
-                "pending" => BorsStatus::Pending,
-                "success" => BorsStatus::Success,
-                other => BorsStatus::Other(other.to_string()),
-            };
-
-            let mergeable = match mergeable.trim() {
-                "" => {
-                    tracing::warn!("mergable empty");
-                    true
-                }
-                "yes" => true,
-                "no" => false,
-                other => {
-                    tracing::error!("weird mergeable status: {other}");
-                    continue;
-                }
-            };
-
-            let rollup_status = match rollup.trim() {
-                "" => RollupSetting::Unset,
-                "never" => RollupSetting::Never,
-                "always" => RollupSetting::Always,
-                "iffy" => RollupSetting::Iffy,
-                other => {
-                    tracing::error!("weird rollup status: {other}");
-                    continue;
-                }
-            };
-
-            let Ok(priority) = priority.trim().parse::<u64>() else {
-                tracing::error!("parse priority: {}", priority.trim());
-                continue;
-            };
-
-            let res = BorsPr {
-                pr_number: number,
-                approver: approver.trim().to_string(),
-                status,
-                mergeable,
-                rollup_setting: rollup_status,
-                priority,
-                title: title.trim().to_string(),
-                position_in_queue: position_in_queue,
-                running: position_in_queue == 1,
-                url: url.clone(),
-            };
-
-            prs.push(res);
-        }
-    }
-
-    Ok(BorsQueue { items: prs })
+    println!("{:?}", items.iter().map(|i| &i.status).collect::<Vec<_>>());
+    Ok(BorsQueue {
+        items: items
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, api)| {
+                let number = api.number?;
+                Some(BorsPr {
+                    position_in_queue: idx + 1,
+                    running: idx == 0,
+                    url: Url::parse(&format!(
+                        "https://github.com/rust-lang/rust/issues/{number}",
+                    ))
+                    .unwrap(),
+                    number,
+                    author: api.author.unwrap_or_default(),
+                    approver: api.approver.unwrap_or_default(),
+                    status: api.status,
+                    priority: api.priority.unwrap_or(0),
+                    title: api.title,
+                })
+            })
+            .collect(),
+    })
 }

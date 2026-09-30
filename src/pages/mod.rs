@@ -18,8 +18,15 @@ pub enum QueuePageWebsocketMessageRx {
 #[derive(Serialize)]
 #[serde(tag = "key")]
 pub enum QueuePageWebsocketMessageTx {
-    UpdatePage { main_contents: String },
-    SetUsername { new_name: String },
-    UsernameSuggestions { suggestions: Vec<Author> },
+    UpdatePage {
+        main_contents: String,
+    },
+    SetUsername {
+        new_name: String,
+    },
+    UsernameSuggestions {
+        suggestions: Vec<Author>,
+    },
+    #[allow(unused)]
     UsernameNotValid,
 }
