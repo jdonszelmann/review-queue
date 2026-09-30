@@ -34,6 +34,7 @@
             (import wild)
           ];
         };
+        inherit (pkgs) lib;
 
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
         naersk' = pkgs.callPackage naersk {
@@ -52,7 +53,9 @@
           reviewqueue-bin = naersk'.buildPackage {
             src = ./.;
             inherit nativeBuildInputs;
+            buildInputs = [ pkgs.openssl_3 ];
             PKG_CONFIG_PATH = "${pkgs.openssl_3.dev}/lib/pkgconfig";
+            LD_LIBRARY_PATH = "'$LD_LIBRARY_PATH:${lib.makeLibraryPath nativeBuildInputs}";
           };
           default = pkgs.stdenv.mkDerivation {
             name = "reviewqueue";
@@ -81,8 +84,7 @@
               llvmPackages_latest.bintools
               toolchain
             ];
-            packages = [
-            ];
+            packages = [ ];
 
             env = {
               DB_PATH = "db.sqlite";

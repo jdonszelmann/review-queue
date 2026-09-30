@@ -300,11 +300,7 @@ async fn main() -> color_eyre::Result<()> {
         .with_state(Arc::new(AppState::new(db, config.clone())))
         .nest_service("/assets/", ServeDir::new(config.assets_dir.clone()));
 
-    let address = config
-        .host
-        .as_str()
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
+    let address = "localhost:3000";
 
     let listener = tokio::net::TcpListener::bind(address).await.unwrap();
 
