@@ -285,9 +285,14 @@ fn queue_page_main(issues_or_prs: &[IssueOrPr]) -> Markup {
     let mut prs = Vec::new();
 
     for i in issues_or_prs {
-        if !match i {
-            IssueOrPr::Pr(pr) => issue_names.insert(&pr.title),
-            IssueOrPr::Issue(issue) => issue_names.insert(&issue.title),
+        if match i {
+            IssueOrPr::Pr(pr) => {
+                if !matches!(pr.status, PrStatus::Mentioned) {
+                    issue_names.insert(&pr.title);
+                }
+                false
+            }
+            IssueOrPr::Issue(issue) => !issue_names.insert(&issue.title),
         } {
             continue;
         }
@@ -298,6 +303,12 @@ fn queue_page_main(issues_or_prs: &[IssueOrPr]) -> Markup {
         }
     }
 
+    let mentioned_prs = prs
+        .iter()
+        .filter(|i| !issue_names.contains(&i.title))
+        .cloned()
+        .collect::<Vec<_>>();
+
     html! {
         main id="main" {
             (render_pr_box(ReadyPrBox(&prs)))
@@ -307,7 +318,7 @@ fn queue_page_main(issues_or_prs: &[IssueOrPr]) -> Markup {
             (render_pr_box(QueuedPrBox(&prs)))
             (render_pr_box(DraftPrBox(&prs)))
             (render_pr_box(IssuesBox(&issues)))
-            (render_pr_box(MentionedPrBox(&prs)))
+            (render_pr_box(MentionedPrBox(&mentioned_prs)))
         }
     }
 }
