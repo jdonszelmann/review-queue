@@ -46,7 +46,6 @@ impl FcpStatus {
 #[derive(Clone, Debug, Serialize)]
 pub struct Author {
     pub name: String,
-    pub id: u64,
     pub avatar_url: Url,
     pub profile_url: Url,
 }
@@ -78,6 +77,42 @@ pub enum QueueStatus {
 }
 
 #[derive(Clone, Debug)]
+pub enum IssueOrPr {
+    Pr(Pr),
+    Issue(Issue),
+}
+
+impl IssueOrPr {
+    pub fn number(&self) -> u64 {
+        match self {
+            IssueOrPr::Pr(pr) => pr.number,
+            IssueOrPr::Issue(issue) => issue.number,
+        }
+    }
+
+    pub fn title(&self) -> &str {
+        match self {
+            IssueOrPr::Pr(pr) => &pr.title,
+            IssueOrPr::Issue(issue) => &issue.title,
+        }
+    }
+
+    pub fn repo(&self) -> &Repo {
+        match self {
+            IssueOrPr::Pr(pr) => &pr.repo,
+            IssueOrPr::Issue(issue) => &issue.repo,
+        }
+    }
+
+    pub fn link(&self) -> &Url {
+        match self {
+            IssueOrPr::Pr(pr) => &pr.link,
+            IssueOrPr::Issue(issue) => &issue.link,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Pr {
     pub repo: Repo,
     pub title: String,
@@ -91,6 +126,7 @@ pub struct Pr {
     pub status: PrStatus,
 
     pub ci_status: CiStatus,
+    pub related_issues: Vec<Issue>,
 
     pub created: Timestamp,
 }
@@ -126,16 +162,7 @@ pub enum PrStatus {
     /// Approved & Queued
     Queued(QueuedInfo),
     Draft {},
-    Subscribed,
-}
-
-#[derive(Debug, Clone, Default)]
-pub enum RollupSetting {
-    Never,
-    Always,
-    Iffy,
-    #[default]
-    Unset,
+    Mentioned,
 }
 
 #[derive(Clone, Debug)]
@@ -170,4 +197,19 @@ pub enum WaitingReason {
 
     /// weird
     Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub struct Issue {
+    pub repo: Repo,
+    pub title: String,
+    pub description: Option<String>,
+    pub number: u64,
+    pub link: Url,
+
+    pub author: Author,
+    pub assigned: Vec<Author>,
+    pub me_assigned: bool,
+
+    pub created: Timestamp,
 }

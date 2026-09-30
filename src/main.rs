@@ -20,7 +20,7 @@ use crate::{
         github::scrape_github_for_user,
         rollup::find_rollups,
     },
-    model::{CraterStatus, Pr, RepoInfo},
+    model::{CraterStatus, IssueOrPr, RepoInfo},
 };
 use crate::{
     api::{crater::get_crater_queue, rfcbot::get_fcp_info},
@@ -53,8 +53,8 @@ pub struct Config {
 
 #[derive(Default)]
 struct UserState {
-    prs: OnceCell<Vec<Pr>>,
-    old: Vec<Pr>,
+    prs: OnceCell<Vec<IssueOrPr>>,
+    old: Vec<IssueOrPr>,
 }
 
 struct AppState {
@@ -70,7 +70,7 @@ struct AppState {
     users_prs_by_username: RwLock<HashMap<String, UserState>>,
 }
 
-async fn get_state_instantly(config: Arc<LoginContext>) -> Vec<Pr> {
+async fn get_state_instantly(config: Arc<LoginContext>) -> Vec<IssueOrPr> {
     let state = config.state.users_prs_by_username.read().await;
 
     state
@@ -79,7 +79,7 @@ async fn get_state_instantly(config: Arc<LoginContext>) -> Vec<Pr> {
         .unwrap_or_default()
 }
 
-async fn update_prs_database(prs: &[Pr], username: String, config: Arc<LoginContext>) {
+async fn update_prs_database(prs: &[IssueOrPr], username: String, config: Arc<LoginContext>) {
     if config.base_username != username {
         return;
     }
@@ -101,7 +101,7 @@ async fn update_prs_database(prs: &[Pr], username: String, config: Arc<LoginCont
         let user = user_row.into_expr();
         for pr in prs {
             let res = txn.insert(db::Issue {
-                number: pr.number as i64,
+                number: pr.number() as i64,
                 user: user_row,
                 last_seen_sequence_number: &user.sequence_number,
             });
@@ -119,7 +119,7 @@ async fn update_prs_database(prs: &[Pr], username: String, config: Arc<LoginCont
     });
 }
 
-async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<Pr> {
+async fn get_and_update_state(config: Arc<LoginContext>) -> Vec<IssueOrPr> {
     let username = config.username().await;
     tracing::info!("refreshing for user {username}");
 

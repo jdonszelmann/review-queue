@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use octocrab::models::{
-    issues::Issue,
-    pulls::{MergeableState, PullRequest},
-};
+use octocrab::models::{issues::Issue, pulls::MergeableState};
 
 use crate::{
-    api::bors::{BorsPr, BorsQueue, BorsStatus},
+    api::{
+        bors::{BorsPr, BorsQueue},
+        github::RawPullRequestData,
+    },
     login_cx::LoginContext,
     model::{
-        Author, CiStatus, CraterStatus, Pr, PrStatus, QueueStatus, QueuedInfo, RepoInfo,
-        WaitingReason,
+        self, Author, CiStatus, CraterStatus, IssueOrPr, Pr, PrStatus, QueueStatus, QueuedInfo,
+        RepoInfo, WaitingReason,
     },
 };
 
@@ -21,7 +21,7 @@ fn label(issue: &Issue, label: impl AsRef<str>) -> bool {
 async fn sort_waiting(
     login_context: &LoginContext,
     issue: &Issue,
-    _pr: &PullRequest,
+    _pr: &RawPullRequestData,
     _bors_for_pr: Option<&BorsPr>,
 ) -> WaitingReason {
     if label(issue, "S-waiting-on-author") {
@@ -123,12 +123,12 @@ async fn sort_status(
     username: String,
     repo: &RepoInfo,
     issue: &Issue,
-    pr: &PullRequest,
+    pr: &RawPullRequestData,
     bors_for_repo: &Arc<BorsQueue>,
 ) -> PrStatus {
     let bors_for_pr = bors_for_repo.for_pr(issue.number);
 
-    let res = if pr.draft.is_some_and(|i| i) {
+    let res = if pr.draft {
         PrStatus::Draft {}
     } else if
     // you're assigned for review
@@ -168,35 +168,27 @@ async fn sort_status(
     res
 }
 
-fn ci_status(issue: &Issue, pr: &PullRequest, bors_for_repo: &Arc<BorsQueue>) -> CiStatus {
-    let bors_for_pr = bors_for_repo.for_pr(issue.number);
+fn ci_status(issue: &Issue, pr: &RawPullRequestData, bors_for_repo: &Arc<BorsQueue>) -> CiStatus {
+    match &pr.mergeable_state {
+        _ if pr.draft => CiStatus::Draft,
+        _ if matches!(pr.mergeable, Some(false)) => CiStatus::Conflicted,
+        MergeableState::Behind | MergeableState::Dirty => CiStatus::Conflicted,
 
-    match (pr.mergeable, &pr.mergeable_state, bors_for_pr) {
-        _ if pr.draft.is_some_and(|i| i) => CiStatus::Draft,
-        (Some(_), Some(MergeableState::Behind | MergeableState::Dirty), _) => CiStatus::Conflicted,
-
-        // github: super unreliable
-        (None, _, _) => CiStatus::Running,
-        (Some(true), None, _) => CiStatus::Good,
-        (Some(_), Some(s), _) => match s {
-            MergeableState::Behind => CiStatus::Conflicted,
-            MergeableState::Dirty => CiStatus::Conflicted,
-            MergeableState::Blocked => CiStatus::Unknown,
-            MergeableState::Clean => CiStatus::Good,
-            MergeableState::Draft => CiStatus::Draft,
-            MergeableState::HasHooks => CiStatus::Good,
-            MergeableState::Unknown => CiStatus::Unknown,
-            MergeableState::Unstable => CiStatus::Good,
-            _ => todo!(),
-        },
+        MergeableState::Blocked => CiStatus::Unknown,
+        MergeableState::Clean => CiStatus::Good,
+        MergeableState::Draft => CiStatus::Draft,
+        MergeableState::HasHooks => CiStatus::Good,
+        MergeableState::Unknown => CiStatus::Unknown,
+        MergeableState::Unstable => CiStatus::Good,
         _ => CiStatus::Unknown,
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum PredeterminedCategory {
-    Subscribed,
-    None(PullRequest),
+    Mentioned,
+    Pr(RawPullRequestData),
+    Issue,
 }
 
 pub async fn sort(
@@ -205,44 +197,67 @@ pub async fn sort(
     repo: &RepoInfo,
     issue: &Issue,
     predetermined_category: PredeterminedCategory,
-) -> Option<Pr> {
+) -> Option<IssueOrPr> {
     tracing::info!("sorting PR {}#{} {}", repo.repo, issue.number, issue.title);
     let bors_for_repo = login_context.state.bors_info(repo.clone()).await;
 
     // no subscribed issues when impersonating
-    if let PredeterminedCategory::Subscribed = predetermined_category
+    if let PredeterminedCategory::Mentioned = predetermined_category
         && login_context.base_username != username
     {
         return None;
     }
 
-    Some(Pr {
+    Some(match &predetermined_category {
+        PredeterminedCategory::Mentioned => IssueOrPr::Pr(Pr {
+            repo: repo.repo.clone(),
+            title: issue.title.clone(),
+            description: issue.body.clone(),
+            number: issue.number,
+            link: issue.html_url.clone(),
+            author: convert_author(&issue.user),
+            reviewers: issue.assignees.iter().map(convert_author).collect(),
+            status: PrStatus::Mentioned,
+            ci_status: CiStatus::Unknown,
+            related_issues: Vec::new(),
+
+            created: jiff::Timestamp::from_second(issue.created_at.timestamp()).unwrap(),
+        }),
+        PredeterminedCategory::Pr(pr) => IssueOrPr::Pr(Pr {
+            repo: repo.repo.clone(),
+            title: issue.title.clone(),
+            description: issue.body.clone(),
+            number: issue.number,
+            link: issue.html_url.clone(),
+            author: convert_author(&issue.user),
+            reviewers: issue.assignees.iter().map(convert_author).collect(),
+            status: sort_status(login_context, username, repo, issue, pr, &bors_for_repo).await,
+            ci_status: ci_status(issue, pr, &bors_for_repo),
+            related_issues: pr.issues.to_vec(),
+
+            created: jiff::Timestamp::from_second(issue.created_at.timestamp()).unwrap(),
+        }),
+        PredeterminedCategory::Issue => IssueOrPr::Issue(convert_issue(repo, &username, issue)),
+    })
+}
+
+fn convert_issue(repo: &RepoInfo, username: &str, issue: &Issue) -> model::Issue {
+    model::Issue {
         repo: repo.repo.clone(),
         title: issue.title.clone(),
         description: issue.body.clone(),
         number: issue.number,
         link: issue.html_url.clone(),
         author: convert_author(&issue.user),
-        reviewers: issue.assignees.iter().map(convert_author).collect(),
-        status: match &predetermined_category {
-            PredeterminedCategory::None(pr) => {
-                sort_status(login_context, username, repo, issue, pr, &bors_for_repo).await
-            }
-            PredeterminedCategory::Subscribed => PrStatus::Subscribed,
-        },
-        ci_status: match &predetermined_category {
-            PredeterminedCategory::None(pr) => ci_status(issue, pr, &bors_for_repo),
-            PredeterminedCategory::Subscribed => CiStatus::Unknown,
-        },
-
+        assigned: issue.assignees.iter().map(convert_author).collect(),
+        me_assigned: issue.assignees.iter().any(|i| i.login == username),
         created: jiff::Timestamp::from_second(issue.created_at.timestamp()).unwrap(),
-    })
+    }
 }
 
 pub fn convert_author(author: &octocrab::models::Author) -> Author {
     Author {
         name: author.login.clone(),
-        id: *author.id,
         avatar_url: author.avatar_url.clone(),
         profile_url: author.html_url.clone(),
     }

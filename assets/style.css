@@ -228,6 +228,7 @@ main {
     flex-direction: column;
     gap: 0;
 
+    overflow-wrap: break-word;
     position: relative;
 
     h2 {
@@ -239,6 +240,48 @@ main {
         margin-top: 0;
         font-size: small;
         margin-bottom: 1em;
+    }
+
+    .related {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        font-size: x-small;
+        margin: 0.5em;
+
+        .related-issues-wrapper {
+            position: absolute;
+            z-index: 10;
+            top: 0;
+            margin-top: 1.5em;
+
+            .related-issues {
+                display: flex;
+                background-color: #212830;
+                border-radius: 0.5em;
+                border: 1px solid;
+                flex-direction: column;
+                gap: 0.5em;
+                padding: 1em 1em;
+            }
+        }
+    }
+
+}
+
+.pr.issue {
+    min-height: 2em;
+    padding-bottom: 0.75em;
+
+    h2 {
+        font-size: small;
+    }
+
+    .fields {
+        display: none;
+    }
+    .pr-link {
+        margin-bottom: 0.2em;
     }
 }
 

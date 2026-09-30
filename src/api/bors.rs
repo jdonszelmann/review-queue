@@ -60,7 +60,6 @@ pub async fn get_bors_info(url: Url) -> color_eyre::Result<BorsQueue> {
     let response = reqwest::get(url.clone()).await.context("get bors info")?;
     let items: Vec<BorsApiPr> = response.json().await.context("body")?;
 
-    println!("{:?}", items.iter().map(|i| &i.status).collect::<Vec<_>>());
     Ok(BorsQueue {
         items: items
             .into_iter()

@@ -25,7 +25,7 @@ use crate::{
     get_and_update_state, get_state_instantly,
     login_cx::LoginContext,
     model::{
-        Author, CiStatus, CraterStatus, Pr, PrStatus, QueueStatus, QueuedInfo, RollupSetting,
+        Author, CiStatus, CraterStatus, Issue, IssueOrPr, Pr, PrStatus, QueueStatus, QueuedInfo,
         WaitingReason,
     },
     pages::{QueuePageWebsocketMessageRx, QueuePageWebsocketMessageTx, auth::ExtractLoginContext},
@@ -274,15 +274,27 @@ pub async fn queue_page(ExtractLoginContext(config): ExtractLoginContext) -> Res
     .into_response()
 }
 
-fn queue_page_main(prs: &[Pr]) -> Markup {
+fn queue_page_main(issues_or_prs: &[IssueOrPr]) -> Markup {
+    let mut issues = Vec::new();
+    let mut prs = Vec::new();
+
+    for i in issues_or_prs {
+        match i {
+            IssueOrPr::Pr(pr) => prs.push(pr.clone()),
+            IssueOrPr::Issue(issue) => issues.push(issue.clone()),
+        }
+    }
+
     html! {
         main id="main" {
-            (render_pr_box(ReadyPrBox(prs)))
-            (render_pr_box(ReviewPrBox(prs)))
-            (render_pr_box(BlockedPrBox(prs)))
-            (render_pr_box(QueuedPrBox(prs)))
-            (render_pr_box(SubscribedPrBox(prs)))
-            (render_pr_box(DraftPrBox(prs)))
+            (render_pr_box(ReadyPrBox(&prs)))
+            (render_pr_box(ReviewPrBox(&prs)))
+            (render_pr_box(AssignedIssuesBox(&issues)))
+            (render_pr_box(BlockedPrBox(&prs)))
+            (render_pr_box(QueuedPrBox(&prs)))
+            (render_pr_box(DraftPrBox(&prs)))
+            (render_pr_box(IssuesBox(&issues)))
+            (render_pr_box(MentionedPrBox(&prs)))
         }
     }
 }
@@ -292,6 +304,45 @@ trait PrBox {
 
     fn title(&self) -> impl Render;
     fn render(&self, res: &mut Vec<(Markup, Self::SortKey)>);
+}
+
+struct AssignedIssuesBox<'a>(&'a [Issue]);
+
+impl<'a> PrBox for AssignedIssuesBox<'a> {
+    type SortKey = &'a Timestamp;
+
+    fn title(&self) -> impl Render {
+        "Issues"
+    }
+
+    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+        for i in self.0 {
+            if !i.me_assigned {
+                continue;
+            }
+
+            res.push((issue_skeleton(i, vec![], vec![]), &i.created));
+        }
+    }
+}
+
+struct IssuesBox<'a>(&'a [Issue]);
+
+impl<'a> PrBox for IssuesBox<'a> {
+    type SortKey = &'a Timestamp;
+
+    fn title(&self) -> impl Render {
+        "Issues mentioning me"
+    }
+
+    fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
+        for i in self.0 {
+            if i.me_assigned {
+                continue;
+            }
+            res.push((issue_skeleton(i, vec![], vec![]), &i.created));
+        }
+    }
 }
 
 struct ReadyPrBox<'a>(&'a [Pr]);
@@ -516,18 +567,18 @@ impl<'a> PrBox for DraftPrBox<'a> {
     }
 }
 
-struct SubscribedPrBox<'a>(&'a [Pr]);
+struct MentionedPrBox<'a>(&'a [Pr]);
 
-impl<'a> PrBox for SubscribedPrBox<'a> {
+impl<'a> PrBox for MentionedPrBox<'a> {
     type SortKey = &'a Timestamp;
 
     fn title(&self) -> impl Render {
-        "Subscribed"
+        "Mentioning me"
     }
 
     fn render(&self, res: &mut Vec<(Markup, &'a Timestamp)>) {
         for i in self.0 {
-            let PrStatus::Subscribed {} = &i.status else {
+            let PrStatus::Mentioned = &i.status else {
                 continue;
             };
 
@@ -535,7 +586,6 @@ impl<'a> PrBox for SubscribedPrBox<'a> {
                 pr_skeleton(
                     i,
                     iter::once(Field::Author(&i.author))
-                        // TODO: only other reviewers?
                         .chain(i.reviewers.iter().map(Field::Reviewer)),
                     vec![],
                 ),
@@ -563,17 +613,6 @@ fn render_pr_box(pr_box: impl PrBox) -> Markup {
                     (pr)
                 }
             }
-        }
-    }
-}
-
-impl Render for RollupSetting {
-    fn render(&self) -> Markup {
-        match self {
-            RollupSetting::Never => html! {"rollup=never"},
-            RollupSetting::Always => html! {},
-            RollupSetting::Iffy => html! {"rollup=iffy"},
-            RollupSetting::Unset => html! {},
         }
     }
 }
@@ -771,6 +810,20 @@ impl Render for Field<'_> {
     }
 }
 
+fn related_skeleton<'a>(issue: &Issue) -> Markup {
+    html! {
+        div class="pr issue" {
+            h2 class="title" { a target="_blank" rel="noopener noreferrer" href=(issue.link) {
+                (issue.title)
+            }}
+
+            a class="pr-link" target="_blank" rel="noopener noreferrer" href=(issue.link) {
+                (issue.repo) "#" (issue.number)
+            }
+        }
+    }
+}
+
 fn pr_skeleton<'a>(
     pr: &Pr,
     fields: impl IntoIterator<Item = Field<'a>>,
@@ -778,6 +831,49 @@ fn pr_skeleton<'a>(
 ) -> Markup {
     html! {
         div class="pr" {
+            h2 class="title" { a target="_blank" rel="noopener noreferrer" href=(pr.link) {
+                (pr.title)
+            }}
+
+            a class="pr-link" target="_blank" rel="noopener noreferrer" href=(pr.link) {
+                (pr.repo) "#" (pr.number)
+            }
+
+            div class="fields" {
+                @for field in fields {
+                    (field)
+                }
+
+                div class="badges" {
+                    @for badge in badges {
+                        (badge)
+                    }
+                }
+            }
+
+            @if !pr.related_issues.is_empty() {
+                details class="related" {
+                    summary {"Closes " (pr.related_issues.len()) " issues..."}
+                    div class="related-issues-wrapper" {
+                        div class="related-issues" {
+                            @for related in &pr.related_issues {
+                                (&related_skeleton(related))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn issue_skeleton<'a>(
+    pr: &Issue,
+    fields: impl IntoIterator<Item = Field<'a>>,
+    badges: impl IntoIterator<Item = Badge<'a>>,
+) -> Markup {
+    html! {
+        div class="pr issue" {
             h2 class="title" { a target="_blank" rel="noopener noreferrer" href=(pr.link) {
                 (pr.title)
             }}
