@@ -11,7 +11,6 @@ use octocrab::{
     params,
 };
 use reqwest::StatusCode;
-use serde::Deserialize;
 use tokio::{spawn, time::sleep};
 
 use futures::channel::mpsc::channel;
